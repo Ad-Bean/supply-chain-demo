@@ -18,14 +18,16 @@ st.set_page_config(
     layout="wide",
 )
 
-# Auto-refresh every 5 seconds
-st.markdown(
-    '<meta http-equiv="refresh" content="5">',
-    unsafe_allow_html=True,
-)
+import time as _time
 
 st.title("Supply Chain Control Tower")
 st.caption("Real-time monitoring powered by RisingWave + AI Agent")
+
+# Refresh controls in sidebar
+with st.sidebar:
+    auto_refresh = st.toggle("Auto-refresh (5s)", value=True)
+    if st.button("Refresh Now"):
+        st.rerun()
 
 # ── Row 1: KPI metrics ──────────────────────────────────────────────────────
 
@@ -269,3 +271,9 @@ try:
         st.success("No cascading disruptions.")
 except Exception as e:
     st.error(f"Error: {e}")
+
+# ── Auto-refresh (at the bottom so page renders first) ───────────────────────
+
+if auto_refresh:
+    _time.sleep(5)
+    st.rerun()
