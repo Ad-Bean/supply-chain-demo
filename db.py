@@ -56,6 +56,7 @@ def query_batch(queries: dict[str, str]) -> dict[str, list[dict]]:
                     cur.execute(sql)
                     results[key] = [dict(r) for r in cur.fetchall()]
                 except Exception:
+                    conn.rollback()
                     results[key] = []
         return results
     finally:

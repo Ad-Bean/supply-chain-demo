@@ -114,9 +114,15 @@ with st.sidebar:
               help="Reveal the RisingWave materialized view definitions behind each panel")
 
     REFRESH_OPTIONS = {"1s": 1, "2s": 2, "3s": 3, "5s": 5, "10s": 10, "30s": 30}
+
+    def _on_refresh_change():
+        st.session_state._refresh_sec = REFRESH_OPTIONS[st.session_state._refresh_sel]
+
     refresh_label = st.selectbox("Refresh interval", list(REFRESH_OPTIONS.keys()), index=3,
+                                 key="_refresh_sel", on_change=_on_refresh_change,
                                  help="How often the dashboard fetches fresh data from RisingWave")
-    st.session_state._refresh_sec = REFRESH_OPTIONS[refresh_label]
+    if "_refresh_sec" not in st.session_state:
+        st.session_state._refresh_sec = REFRESH_OPTIONS[refresh_label]
 
     st.divider()
 

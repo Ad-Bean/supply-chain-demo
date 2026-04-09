@@ -77,17 +77,18 @@ def main():
 
     # Step 2: Start generators
     console.print(Panel("[bold]Step 2/5: Starting data generators...[/]", border_style="blue"))
+    stop = threading.Event()
     for target, kwargs in [
-        (run_orders, {"interval": 1.5}),
-        (run_warehouse, {"interval": 2.0}),
-        (run_shipments, {"interval": 1.5}),
-        (run_gps, {"interval": 3.0}),
+        (run_orders, {"interval": 1.5, "stop_event": stop}),
+        (run_warehouse, {"interval": 2.0, "stop_event": stop}),
+        (run_shipments, {"interval": 1.5, "stop_event": stop}),
+        (run_gps, {"interval": 3.0, "stop_event": stop}),
     ]:
         threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
 
     # Step 3: Start agent
     console.print(Panel("[bold]Step 3/5: Starting AI disruption agent...[/]", border_style="blue"))
-    threading.Thread(target=run_agent, kwargs={"poll_interval": 5.0}, daemon=True).start()
+    threading.Thread(target=run_agent, kwargs={"poll_interval": 5.0, "stop_event": stop}, daemon=True).start()
 
     # Step 4: Let pipeline fill
     console.print(Panel(

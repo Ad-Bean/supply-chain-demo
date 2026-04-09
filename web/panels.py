@@ -46,7 +46,7 @@ def render_order_funnel(data: dict):
                      labels={"current_status": "Status", "cnt": "Count"})
         fig.update_layout(showlegend=False)
         apply_rw_layout(fig, height=340)
-        st.plotly_chart(fig, key="funnel")
+        st.plotly_chart(fig, key="funnel", use_container_width=True)
     else:
         st.info("No orders yet. Start generators from the sidebar.")
 
@@ -96,7 +96,6 @@ def _render_fleet_map_inner(data: dict):
             hover_name="truck_id",
             hover_data={"speed_mph": True, "remaining_stops": True,
                         "destination": True, "status": False, "lat": False, "lon": False},
-            size_max=12,
             zoom=3,
             center={"lat": 37.5, "lon": -96},
         )
@@ -111,7 +110,7 @@ def _render_fleet_map_inner(data: dict):
             map_style="carto-darkmatter",
         )
         fig.update_traces(marker=dict(size=10))
-        st.plotly_chart(fig, key="fleet_map")
+        st.plotly_chart(fig, key="fleet_map", use_container_width=True)
     else:
         st.info("No fleet tracking data yet.")
 
