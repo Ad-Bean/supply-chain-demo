@@ -46,7 +46,7 @@ def render_order_funnel(data: dict):
                      labels={"current_status": "Status", "cnt": "Count"})
         fig.update_layout(showlegend=False)
         apply_rw_layout(fig, height=340)
-        st.plotly_chart(fig, key="funnel", use_container_width=True)
+        st.plotly_chart(fig, key="funnel", width="stretch")
     else:
         st.info("No orders yet. Start generators from the sidebar.")
 
@@ -110,7 +110,7 @@ def _render_fleet_map_inner(data: dict):
             map_style="carto-darkmatter",
         )
         fig.update_traces(marker=dict(size=10))
-        st.plotly_chart(fig, key="fleet_map", use_container_width=True)
+        st.plotly_chart(fig, key="fleet_map", width="stretch")
     else:
         st.info("No fleet tracking data yet.")
 
