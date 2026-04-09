@@ -256,15 +256,16 @@ with st.sidebar:
 
     st.divider()
 
-    if st.button("Reset All Data", use_container_width=True):
+    def _do_reset():
         _stop_generators()
         _stop_agent()
+        # Must set these BEFORE widgets render (callback runs pre-render)
         st.session_state.gen_toggle = False
         st.session_state.agent_toggle = False
         from scripts.reset import main as reset_main
         reset_main()
-        st.toast("All data cleared. Generators and agent stopped.", icon="🗑️")
-        st.rerun()
+
+    st.button("Reset All Data", use_container_width=True, on_click=_do_reset)
 
     # Footer
     st.markdown(f"""
