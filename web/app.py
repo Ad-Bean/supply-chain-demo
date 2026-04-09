@@ -114,93 +114,55 @@ st.markdown(f"""
 """, unsafe_allow_html=True)
 
 # ── Background services ──────────────────────────────────────────────────────
+#
+# Each service has:
+#   - A threading.Event (stop signal)
+#   - A toggle widget key (gen_toggle / agent_toggle) as single source of truth
+#
+# The on_change callback fires BEFORE the next render, so it's safe to
+# start/stop threads there without race conditions.
 
 if "gen_stop" not in st.session_state:
     st.session_state.gen_stop = threading.Event()
 if "agent_stop" not in st.session_state:
     st.session_state.agent_stop = threading.Event()
-if "gen_threads_alive" not in st.session_state:
-    st.session_state.gen_threads_alive = False
-if "agent_thread_alive" not in st.session_state:
-    st.session_state.agent_thread_alive = False
-
-# Sync toggle default with actual thread state on first load.
-# gen_threads_alive tracks whether we started threads in this process.
-# If code reloads (file save) but process persists, threads survive —
-# stop_event.is_set() tells us if they were told to stop.
-if "gen_toggle" not in st.session_state:
-    alive = st.session_state.gen_threads_alive and not st.session_state.gen_stop.is_set()
-    st.session_state.gen_toggle = alive
-if "agent_toggle" not in st.session_state:
-    alive = st.session_state.agent_thread_alive and not st.session_state.agent_stop.is_set()
-    st.session_state.agent_toggle = alive
-
-# Safety: if toggle is OFF but threads are alive (e.g. code changed while running),
-# signal them to stop so UI and reality stay in sync.
-if not st.session_state.gen_toggle and st.session_state.gen_threads_alive and not st.session_state.gen_stop.is_set():
-    st.session_state.gen_stop.set()
-    st.session_state.gen_threads_alive = False
-if not st.session_state.agent_toggle and st.session_state.agent_thread_alive and not st.session_state.agent_stop.is_set():
-    st.session_state.agent_stop.set()
-    st.session_state.agent_thread_alive = False
-
-
-def _start_generators():
-    from generators.order_gen import run as run_orders
-    from generators.warehouse_gen import run as run_warehouse
-    from generators.shipment_gen import run as run_shipments
-    from generators.gps_gen import run as run_gps
-
-    st.session_state.gen_stop.clear()
-    stop = st.session_state.gen_stop
-    for target, kwargs in [
-        (run_orders, {"interval": 2.0, "stop_event": stop}),
-        (run_warehouse, {"interval": 3.0, "stop_event": stop}),
-        (run_shipments, {"interval": 2.0, "stop_event": stop}),
-        (run_gps, {"interval": 4.0, "stop_event": stop}),
-    ]:
-        threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
-    st.session_state.gen_threads_alive = True
-
-
-def _stop_generators():
-    st.session_state.gen_stop.set()
-    st.session_state.gen_threads_alive = False
-
-
-def _start_agent():
-    from agents.disruption_agent import run as run_agent
-
-    st.session_state.agent_stop.clear()
-    threading.Thread(
-        target=run_agent,
-        kwargs={"poll_interval": 5.0, "stop_event": st.session_state.agent_stop},
-        daemon=True,
-    ).start()
-    st.session_state.agent_thread_alive = True
-
-
-def _stop_agent():
-    st.session_state.agent_stop.set()
-    st.session_state.agent_thread_alive = False
 
 
 def _on_gen_toggle():
-    """Called when the toggle widget changes."""
     if st.session_state.gen_toggle:
-        if not st.session_state.gen_threads_alive:
-            _start_generators()
+        # Create a fresh stop event (old threads from previous cycle will
+        # naturally exit when their old event gets GC'd or was already set)
+        st.session_state.gen_stop = threading.Event()
+        stop = st.session_state.gen_stop
+
+        from generators.order_gen import run as run_orders
+        from generators.warehouse_gen import run as run_warehouse
+        from generators.shipment_gen import run as run_shipments
+        from generators.gps_gen import run as run_gps
+
+        for target, kwargs in [
+            (run_orders, {"interval": 2.0, "stop_event": stop}),
+            (run_warehouse, {"interval": 3.0, "stop_event": stop}),
+            (run_shipments, {"interval": 2.0, "stop_event": stop}),
+            (run_gps, {"interval": 4.0, "stop_event": stop}),
+        ]:
+            threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
     else:
-        _stop_generators()
+        st.session_state.gen_stop.set()
 
 
 def _on_agent_toggle():
-    """Called when the toggle widget changes."""
     if st.session_state.agent_toggle:
-        if not st.session_state.agent_thread_alive:
-            _start_agent()
+        st.session_state.agent_stop = threading.Event()
+
+        from agents.disruption_agent import run as run_agent
+        threading.Thread(
+            target=run_agent,
+            kwargs={"poll_interval": 5.0, "stop_event": st.session_state.agent_stop},
+            daemon=True,
+        ).start()
     else:
-        _stop_agent()
+        st.session_state.agent_stop.set()
 
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -257,9 +219,8 @@ with st.sidebar:
     st.divider()
 
     def _do_reset():
-        _stop_generators()
-        _stop_agent()
-        # Must set these BEFORE widgets render (callback runs pre-render)
+        st.session_state.gen_stop.set()
+        st.session_state.agent_stop.set()
         st.session_state.gen_toggle = False
         st.session_state.agent_toggle = False
         from scripts.reset import main as reset_main
@@ -335,7 +296,7 @@ QUERIES = {
 }
 
 
-@st.cache_data(ttl=3)
+@st.cache_data(ttl=3, show_spinner=False)
 def _fetch_all():
     """Fetch all dashboard data in one batch. Cached for 3 seconds."""
     return {key: _safe_query(sql) for key, sql in QUERIES.items()}
