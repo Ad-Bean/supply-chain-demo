@@ -1,0 +1,88 @@
+"""Simulates warehouse processing: orders move through received → picking → packed → shipped.
+Occasionally injects a delay event."""
+
+import random
+import time
+import uuid
+
+from db import execute, query
+from config import GENERATOR_SPEED
+
+# Normal processing pipeline
+PIPELINE = ["received", "picking", "packed", "shipped"]
+
+
+def get_pending_orders() -> list[dict]:
+    """Find orders whose latest event is not yet 'shipped'."""
+    return query("""
+        SELECT o.order_id, o.warehouse_id,
+               COALESCE(
+                   (SELECT we.event_type FROM warehouse_events we
+                    WHERE we.order_id = o.order_id
+                    ORDER BY we.created_at DESC LIMIT 1),
+                   'new'
+               ) AS current_status
+        FROM orders o
+        ORDER BY o.created_at
+    """)
+
+
+def next_event_type(current: str) -> str | None:
+    if current == "new":
+        return "received"
+    try:
+        idx = PIPELINE.index(current)
+        return PIPELINE[idx + 1] if idx + 1 < len(PIPELINE) else None
+    except ValueError:
+        # After a delay, resume from where it was — treat delay as no progression
+        return None
+
+
+def insert_event(order_id: str, warehouse_id: str, event_type: str,
+                 delay_minutes: int = 0, detail: str | None = None):
+    execute(
+        """INSERT INTO warehouse_events (event_id, order_id, warehouse_id,
+           event_type, delay_minutes, detail)
+           VALUES (%(eid)s, %(oid)s, %(wid)s, %(et)s, %(dm)s, %(d)s)""",
+        {
+            "eid": f"WE-{uuid.uuid4().hex[:8].upper()}",
+            "oid": order_id,
+            "wid": warehouse_id,
+            "et": event_type,
+            "dm": delay_minutes,
+            "d": detail,
+        },
+    )
+
+
+def run(interval: float = 3.0):
+    """Continuously advance orders through the warehouse pipeline."""
+    while True:
+        pending = get_pending_orders()
+        if not pending:
+            time.sleep(interval / GENERATOR_SPEED)
+            continue
+
+        order = random.choice(pending)
+        nxt = next_event_type(order["current_status"])
+        if nxt is None:
+            time.sleep(0.5)
+            continue
+
+        # 10% chance of a delay (only during picking or packing)
+        if nxt in ("picking", "packed") and random.random() < 0.10:
+            delay_min = random.choice([15, 30, 45, 60])
+            insert_event(order["order_id"], order["warehouse_id"],
+                         "delay", delay_min,
+                         f"Equipment malfunction — {delay_min}min delay")
+            print(f"[warehouse] ⚠ DELAY {order['order_id']} @ {order['warehouse_id']} "
+                  f"+{delay_min}min")
+        else:
+            insert_event(order["order_id"], order["warehouse_id"], nxt)
+            print(f"[warehouse] {order['order_id']} → {nxt}")
+
+        time.sleep(interval / GENERATOR_SPEED)
+
+
+if __name__ == "__main__":
+    run()
