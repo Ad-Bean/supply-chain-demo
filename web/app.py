@@ -119,16 +119,13 @@ if "gen_stop" not in st.session_state:
     st.session_state.gen_stop = threading.Event()
 if "agent_stop" not in st.session_state:
     st.session_state.agent_stop = threading.Event()
-if "gen_started" not in st.session_state:
-    st.session_state.gen_started = False
-if "agent_started" not in st.session_state:
-    st.session_state.agent_started = False
+if "gen_threads_alive" not in st.session_state:
+    st.session_state.gen_threads_alive = False
+if "agent_thread_alive" not in st.session_state:
+    st.session_state.agent_thread_alive = False
 
 
-def _ensure_generators_running():
-    """Spin up generator threads if not already alive."""
-    if st.session_state.gen_started:
-        return
+def _start_generators():
     from generators.order_gen import run as run_orders
     from generators.warehouse_gen import run as run_warehouse
     from generators.shipment_gen import run as run_shipments
@@ -143,18 +140,15 @@ def _ensure_generators_running():
         (run_gps, {"interval": 4.0, "stop_event": stop}),
     ]:
         threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
-    st.session_state.gen_started = True
+    st.session_state.gen_threads_alive = True
 
 
 def _stop_generators():
     st.session_state.gen_stop.set()
-    st.session_state.gen_started = False
+    st.session_state.gen_threads_alive = False
 
 
-def _ensure_agent_running():
-    """Spin up agent thread if not already alive."""
-    if st.session_state.agent_started:
-        return
+def _start_agent():
     from agents.disruption_agent import run as run_agent
 
     st.session_state.agent_stop.clear()
@@ -163,24 +157,28 @@ def _ensure_agent_running():
         kwargs={"poll_interval": 5.0, "stop_event": st.session_state.agent_stop},
         daemon=True,
     ).start()
-    st.session_state.agent_started = True
+    st.session_state.agent_thread_alive = True
 
 
 def _stop_agent():
     st.session_state.agent_stop.set()
-    st.session_state.agent_started = False
+    st.session_state.agent_thread_alive = False
 
 
 def _on_gen_toggle():
-    if st.session_state._gen_toggle:
-        _ensure_generators_running()
+    """Called when the toggle widget changes."""
+    if st.session_state.gen_toggle:
+        if not st.session_state.gen_threads_alive:
+            _start_generators()
     else:
         _stop_generators()
 
 
 def _on_agent_toggle():
-    if st.session_state._agent_toggle:
-        _ensure_agent_running()
+    """Called when the toggle widget changes."""
+    if st.session_state.agent_toggle:
+        if not st.session_state.agent_thread_alive:
+            _start_agent()
     else:
         _stop_agent()
 
@@ -211,15 +209,13 @@ with st.sidebar:
 
     st.toggle(
         "Data Generators",
-        value=st.session_state.gen_started,
-        key="_gen_toggle",
+        key="gen_toggle",
         on_change=_on_gen_toggle,
         help="Stream orders, warehouse events, shipments, and GPS pings into RisingWave",
     )
     st.toggle(
         "AI Disruption Agent",
-        value=st.session_state.agent_started,
-        key="_agent_toggle",
+        key="agent_toggle",
         on_change=_on_agent_toggle,
         help="Watch for delay alerts and autonomously reroute, notify, and escalate",
     )
@@ -243,6 +239,8 @@ with st.sidebar:
     if st.button("Reset All Data", use_container_width=True):
         _stop_generators()
         _stop_agent()
+        st.session_state.gen_toggle = False
+        st.session_state.agent_toggle = False
         from scripts.reset import main as reset_main
         reset_main()
         st.toast("All data cleared. Generators and agent stopped.", icon="🗑️")
