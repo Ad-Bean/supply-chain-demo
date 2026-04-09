@@ -115,17 +115,20 @@ st.markdown(f"""
 
 # ── Background services ──────────────────────────────────────────────────────
 
-if "generators_running" not in st.session_state:
-    st.session_state.generators_running = False
-if "agent_running" not in st.session_state:
-    st.session_state.agent_running = False
 if "gen_stop" not in st.session_state:
     st.session_state.gen_stop = threading.Event()
 if "agent_stop" not in st.session_state:
     st.session_state.agent_stop = threading.Event()
+if "gen_started" not in st.session_state:
+    st.session_state.gen_started = False
+if "agent_started" not in st.session_state:
+    st.session_state.agent_started = False
 
 
-def start_generators():
+def _ensure_generators_running():
+    """Spin up generator threads if not already alive."""
+    if st.session_state.gen_started:
+        return
     from generators.order_gen import run as run_orders
     from generators.warehouse_gen import run as run_warehouse
     from generators.shipment_gen import run as run_shipments
@@ -140,15 +143,18 @@ def start_generators():
         (run_gps, {"interval": 4.0, "stop_event": stop}),
     ]:
         threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
-    st.session_state.generators_running = True
+    st.session_state.gen_started = True
 
 
-def stop_generators():
+def _stop_generators():
     st.session_state.gen_stop.set()
-    st.session_state.generators_running = False
+    st.session_state.gen_started = False
 
 
-def start_agent():
+def _ensure_agent_running():
+    """Spin up agent thread if not already alive."""
+    if st.session_state.agent_started:
+        return
     from agents.disruption_agent import run as run_agent
 
     st.session_state.agent_stop.clear()
@@ -157,12 +163,26 @@ def start_agent():
         kwargs={"poll_interval": 5.0, "stop_event": st.session_state.agent_stop},
         daemon=True,
     ).start()
-    st.session_state.agent_running = True
+    st.session_state.agent_started = True
 
 
-def stop_agent():
+def _stop_agent():
     st.session_state.agent_stop.set()
-    st.session_state.agent_running = False
+    st.session_state.agent_started = False
+
+
+def _on_gen_toggle():
+    if st.session_state._gen_toggle:
+        _ensure_generators_running()
+    else:
+        _stop_generators()
+
+
+def _on_agent_toggle():
+    if st.session_state._agent_toggle:
+        _ensure_agent_running()
+    else:
+        _stop_agent()
 
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -189,41 +209,20 @@ with st.sidebar:
                 f'letter-spacing:0.1em;margin-bottom:8px;">Data Pipeline</p>',
                 unsafe_allow_html=True)
 
-    if not st.session_state.generators_running:
-        if st.button("Start Generators", type="primary", use_container_width=True):
-            start_generators()
-            st.rerun()
-    else:
-        gc1, gc2 = st.columns([3, 1])
-        with gc1:
-            st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_GREEN};'
-                        f'border-radius:6px;padding:8px 12px;text-align:center;">'
-                        f'<span style="color:{BRAND_GREEN};">&#9679;</span> '
-                        f'<span style="color:#fff;font-size:0.85rem;">Active</span></div>',
-                        unsafe_allow_html=True)
-        with gc2:
-            if st.button("Stop", key="stop_gen", use_container_width=True):
-                stop_generators()
-                st.rerun()
-
-    st.write("")
-
-    if not st.session_state.agent_running:
-        if st.button("Start AI Agent", type="primary", use_container_width=True):
-            start_agent()
-            st.rerun()
-    else:
-        ac1, ac2 = st.columns([3, 1])
-        with ac1:
-            st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_BLUE};'
-                        f'border-radius:6px;padding:8px 12px;text-align:center;">'
-                        f'<span style="color:{BRAND_BLUE_LIGHT};">&#9679;</span> '
-                        f'<span style="color:#fff;font-size:0.85rem;">Watching</span></div>',
-                        unsafe_allow_html=True)
-        with ac2:
-            if st.button("Stop", key="stop_agent", use_container_width=True):
-                stop_agent()
-                st.rerun()
+    st.toggle(
+        "Data Generators",
+        value=st.session_state.gen_started,
+        key="_gen_toggle",
+        on_change=_on_gen_toggle,
+        help="Stream orders, warehouse events, shipments, and GPS pings into RisingWave",
+    )
+    st.toggle(
+        "AI Disruption Agent",
+        value=st.session_state.agent_started,
+        key="_agent_toggle",
+        on_change=_on_agent_toggle,
+        help="Watch for delay alerts and autonomously reroute, notify, and escalate",
+    )
 
     st.divider()
 
@@ -242,9 +241,11 @@ with st.sidebar:
     st.divider()
 
     if st.button("Reset All Data", use_container_width=True):
+        _stop_generators()
+        _stop_agent()
         from scripts.reset import main as reset_main
         reset_main()
-        st.toast("All data cleared!", icon="🗑️")
+        st.toast("All data cleared. Generators and agent stopped.", icon="🗑️")
         st.rerun()
 
     # Footer
