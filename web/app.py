@@ -1,36 +1,124 @@
-"""Supply Chain Control Tower — Live Streaming Dashboard (Streamlit)"""
+"""Supply Chain Control Tower — Live Streaming Dashboard (Streamlit)
+Branded with RisingWave design system."""
 
 import threading
-import time
 import sys
 from pathlib import Path
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
+import plotly.graph_objects as go
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db import query
 
+# ── RisingWave brand tokens ─────────────────────────────────────────────────
+
+BRAND_BLUE = "#005EEC"
+BRAND_BLUE_LIGHT = "#337EF0"
+BRAND_GREEN = "#62F4C0"
+BRAND_GREEN_DARK = "#039777"
+BG_DARK = "#081F29"
+BG_ELEVATED = "#0A3246"
+BG_CARD = "#0C2535"
+TEXT_MUTED = "#A0A0AB"
+TEXT_DIM = "#70707B"
+BORDER_DARK = "rgba(255,255,255,0.1)"
+SUCCESS = "#10B981"
+WARNING = "#F59E0B"
+ERROR = "#EF4444"
+INFO = "#3B82F6"
+
+# Chart palette matching brand
+STAGE_COLORS = {
+    "received": BRAND_BLUE,
+    "picking": WARNING,
+    "packed": "#8B5CF6",
+    "shipped": BRAND_GREEN,
+    "delay": ERROR,
+    "Pending": BRAND_BLUE,
+    "Picking": WARNING,
+    "Packed": "#8B5CF6",
+    "Shipped": BRAND_GREEN,
+    "Delayed": ERROR,
+}
+
 st.set_page_config(
-    page_title="Supply Chain Control Tower",
-    page_icon="🏭",
+    page_title="RisingWave | Supply Chain Control Tower",
+    page_icon="🌊",
     layout="wide",
 )
 
-# ── Background services (generators + agent) via session_state ───────────────
+# ── Custom CSS for RisingWave look ───────────────────────────────────────────
+
+st.markdown(f"""
+<style>
+    /* Header bar */
+    header[data-testid="stHeader"] {{
+        background-color: {BG_DARK};
+    }}
+
+    /* Metric cards */
+    div[data-testid="stMetric"] {{
+        background: {BG_CARD};
+        border: 1px solid {BORDER_DARK};
+        border-radius: 8px;
+        padding: 12px 16px;
+    }}
+    div[data-testid="stMetric"] label {{
+        color: {TEXT_MUTED};
+        font-size: 0.75rem;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+    }}
+    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
+        color: #FFFFFF;
+        font-size: 1.8rem;
+    }}
+
+    /* Subheaders */
+    h3 {{
+        color: {BRAND_GREEN} !important;
+        font-size: 1rem !important;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+    }}
+
+    /* Tables */
+    div[data-testid="stDataFrame"] {{
+        border: 1px solid {BORDER_DARK};
+        border-radius: 8px;
+    }}
+
+    /* Sidebar */
+    section[data-testid="stSidebar"] {{
+        background-color: {BG_CARD};
+        border-right: 1px solid {BORDER_DARK};
+    }}
+
+    /* Disruption button styling */
+    .disruption-btn button {{
+        background-color: {ERROR} !important;
+        border-color: {ERROR} !important;
+    }}
+
+    /* Plotly chart backgrounds */
+    .stPlotlyChart {{
+        border: 1px solid {BORDER_DARK};
+        border-radius: 8px;
+        overflow: hidden;
+    }}
+</style>
+""", unsafe_allow_html=True)
+
+# ── Background services ──────────────────────────────────────────────────────
 
 if "generators_running" not in st.session_state:
     st.session_state.generators_running = False
 if "agent_running" not in st.session_state:
     st.session_state.agent_running = False
-if "gen_threads" not in st.session_state:
-    st.session_state.gen_threads = []
-if "agent_thread" not in st.session_state:
-    st.session_state.agent_thread = None
-if "stop_event" not in st.session_state:
-    st.session_state.stop_event = threading.Event()
 
 
 def start_generators():
@@ -39,83 +127,141 @@ def start_generators():
     from generators.shipment_gen import run as run_shipments
     from generators.gps_gen import run as run_gps
 
-    st.session_state.stop_event.clear()
-    threads = []
     for target, kwargs in [
         (run_orders, {"interval": 2.0}),
         (run_warehouse, {"interval": 3.0}),
         (run_shipments, {"interval": 2.0}),
         (run_gps, {"interval": 4.0}),
     ]:
-        t = threading.Thread(target=target, kwargs=kwargs, daemon=True)
-        t.start()
-        threads.append(t)
-    st.session_state.gen_threads = threads
+        threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
     st.session_state.generators_running = True
 
 
 def start_agent():
     from agents.disruption_agent import run as run_agent
-    t = threading.Thread(target=run_agent, kwargs={"poll_interval": 5.0}, daemon=True)
-    t.start()
-    st.session_state.agent_thread = t
+    threading.Thread(target=run_agent, kwargs={"poll_interval": 5.0}, daemon=True).start()
     st.session_state.agent_running = True
 
 
-def trigger_disruption(warehouse_id: str, delay_minutes: int):
-    from scripts.trigger_disruption import trigger
-    trigger(warehouse_id, delay_minutes)
-
-
-def reset_data():
-    from scripts.reset import main as reset_main
-    reset_main()
-
-
-# ── Sidebar: Control Panel ───────────────────────────────────────────────────
+# ── Sidebar ──────────────────────────────────────────────────────────────────
 
 with st.sidebar:
-    st.header("Control Panel")
+    # RisingWave logo/brand
+    st.markdown(f"""
+    <div style="text-align:center; padding: 8px 0 16px 0;">
+        <span style="font-size: 2rem;">🌊</span>
+        <h2 style="color: #FFFFFF; margin: 4px 0 0 0; font-size: 1.3rem; letter-spacing: -0.02em;">
+            RisingWave
+        </h2>
+        <p style="color: {BRAND_GREEN}; margin: 0; font-size: 0.7rem; text-transform: uppercase;
+                  letter-spacing: 0.1em;">
+            Supply Chain Control Tower
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
 
-    st.subheader("Data Generators")
+    st.divider()
+
+    # Data pipeline controls
+    st.markdown(f'<p style="color:{BRAND_GREEN};font-size:0.7rem;text-transform:uppercase;'
+                f'letter-spacing:0.1em;margin-bottom:8px;">Data Pipeline</p>',
+                unsafe_allow_html=True)
+
     if not st.session_state.generators_running:
         if st.button("Start Generators", type="primary", use_container_width=True):
             start_generators()
             st.rerun()
     else:
-        st.success("Generators running")
+        st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_GREEN};'
+                    f'border-radius:6px;padding:8px 12px;text-align:center;">'
+                    f'<span style="color:{BRAND_GREEN};">&#9679;</span> '
+                    f'<span style="color:#fff;font-size:0.85rem;">Generators Active</span></div>',
+                    unsafe_allow_html=True)
 
-    st.subheader("AI Agent")
+    st.write("")
+
     if not st.session_state.agent_running:
-        if st.button("Start Agent", type="primary", use_container_width=True):
+        if st.button("Start AI Agent", type="primary", use_container_width=True):
             start_agent()
             st.rerun()
     else:
-        st.success("Agent watching for alerts")
+        st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_BLUE};'
+                    f'border-radius:6px;padding:8px 12px;text-align:center;">'
+                    f'<span style="color:{BRAND_BLUE_LIGHT};">&#9679;</span> '
+                    f'<span style="color:#fff;font-size:0.85rem;">Agent Watching</span></div>',
+                    unsafe_allow_html=True)
 
     st.divider()
 
-    st.subheader("Trigger Disruption")
+    # Disruption trigger
+    st.markdown(f'<p style="color:{ERROR};font-size:0.7rem;text-transform:uppercase;'
+                f'letter-spacing:0.1em;margin-bottom:8px;">Chaos Engineering</p>',
+                unsafe_allow_html=True)
+
     wh = st.selectbox("Warehouse", ["WH-01", "WH-02", "WH-03"], index=2)
     delay = st.slider("Delay (minutes)", 15, 90, 45)
-    if st.button("TRIGGER DISRUPTION", type="primary", use_container_width=True):
-        trigger_disruption(wh, delay)
+    if st.button("TRIGGER DISRUPTION", use_container_width=True):
+        from scripts.trigger_disruption import trigger
+        trigger(wh, delay)
         st.toast(f"Disruption triggered at {wh} ({delay}min)!", icon="🚨")
 
     st.divider()
 
     if st.button("Reset All Data", use_container_width=True):
-        reset_data()
+        from scripts.reset import main as reset_main
+        reset_main()
         st.toast("All data cleared!", icon="🗑️")
         st.rerun()
+
+    # Footer
+    st.markdown(f"""
+    <div style="position:fixed;bottom:12px;left:16px;right:16px;text-align:center;">
+        <p style="color:{TEXT_DIM};font-size:0.65rem;">
+            Powered by <span style="color:{BRAND_BLUE_LIGHT};">RisingWave</span> Streaming Database
+            &nbsp;|&nbsp; Real-time Materialized Views
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+
+# ── Plotly theme helper ──────────────────────────────────────────────────────
+
+def apply_rw_layout(fig, height=350):
+    fig.update_layout(
+        height=height,
+        margin=dict(t=10, b=30, l=40, r=10),
+        paper_bgcolor="rgba(0,0,0,0)",
+        plot_bgcolor=BG_CARD,
+        font=dict(color=TEXT_MUTED, size=12),
+        xaxis=dict(gridcolor=BORDER_DARK, zerolinecolor=BORDER_DARK),
+        yaxis=dict(gridcolor=BORDER_DARK, zerolinecolor=BORDER_DARK),
+        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=TEXT_MUTED)),
+    )
+    return fig
 
 
 # ── Header ───────────────────────────────────────────────────────────────────
 
-st.title("Supply Chain Control Tower")
-st.caption("Real-time monitoring powered by RisingWave + AI Agent")
+st.markdown(f"""
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+    <span style="font-size:1.6rem;">🏭</span>
+    <div>
+        <h1 style="margin:0;font-size:1.8rem;color:#FFFFFF;font-weight:400;">
+            Supply Chain Control Tower
+        </h1>
+        <p style="margin:0;color:{TEXT_MUTED};font-size:0.85rem;">
+            Real-time monitoring powered by
+            <span style="color:{BRAND_BLUE_LIGHT};">RisingWave</span>
+            streaming materialized views +
+            <span style="color:{BRAND_GREEN};">AI Agent</span>
+        </p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
-# ── Row 1: KPI Metrics (streaming) ──────────────────────────────────────────
+st.write("")
+
+# ── Row 1: KPI Metrics ──────────────────────────────────────────────────────
 
 
 @st.fragment(run_every=3)
@@ -124,22 +270,22 @@ def kpi_metrics():
         order_counts = query(
             "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status GROUP BY current_status"
         )
-        order_df = pd.DataFrame(order_counts) if order_counts else pd.DataFrame(columns=["current_status", "cnt"])
+        odf = pd.DataFrame(order_counts) if order_counts else pd.DataFrame(columns=["current_status", "cnt"])
     except Exception:
-        order_df = pd.DataFrame(columns=["current_status", "cnt"])
+        odf = pd.DataFrame(columns=["current_status", "cnt"])
 
     try:
         agent_counts = query(
             "SELECT action_type, COUNT(*) AS cnt FROM agent_actions GROUP BY action_type"
         )
-        agent_df = pd.DataFrame(agent_counts) if agent_counts else pd.DataFrame(columns=["action_type", "cnt"])
+        adf = pd.DataFrame(agent_counts) if agent_counts else pd.DataFrame(columns=["action_type", "cnt"])
     except Exception:
-        agent_df = pd.DataFrame(columns=["action_type", "cnt"])
+        adf = pd.DataFrame(columns=["action_type", "cnt"])
 
-    total = int(order_df["cnt"].sum()) if not order_df.empty else 0
-    shipped = int(order_df.loc[order_df["current_status"] == "shipped", "cnt"].sum()) if not order_df.empty else 0
-    delayed = int(order_df.loc[order_df["current_status"] == "delay", "cnt"].sum()) if not order_df.empty else 0
-    agent_acts = int(agent_df["cnt"].sum()) if not agent_df.empty else 0
+    total = int(odf["cnt"].sum()) if not odf.empty else 0
+    shipped = int(odf.loc[odf["current_status"] == "shipped", "cnt"].sum()) if not odf.empty else 0
+    delayed = int(odf.loc[odf["current_status"] == "delay", "cnt"].sum()) if not odf.empty else 0
+    agent_acts = int(adf["cnt"].sum()) if not adf.empty else 0
 
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Orders", total)
@@ -149,14 +295,14 @@ def kpi_metrics():
 
 
 kpi_metrics()
-st.divider()
+st.write("")
 
-# ── Row 2: Order Funnel + Warehouse Load (streaming) ────────────────────────
+# ── Row 2: Order Funnel + Warehouse Load ─────────────────────────────────────
 
 left, right = st.columns(2)
 
 with left:
-    st.subheader("Order Fulfillment Funnel")
+    st.subheader("Order Fulfillment")
 
     @st.fragment(run_every=3)
     def order_funnel():
@@ -166,19 +312,16 @@ with left:
             )
             if rows:
                 df = pd.DataFrame(rows)
-                status_order = ["received", "picking", "packed", "shipped", "delay"]
-                df["current_status"] = pd.Categorical(df["current_status"], categories=status_order, ordered=True)
+                cats = ["received", "picking", "packed", "shipped", "delay"]
+                df["current_status"] = pd.Categorical(df["current_status"], categories=cats, ordered=True)
                 df = df.sort_values("current_status").dropna(subset=["current_status"])
 
-                colors = {
-                    "received": "#3498db", "picking": "#f39c12",
-                    "packed": "#9b59b6", "shipped": "#2ecc71", "delay": "#e74c3c",
-                }
                 fig = px.bar(df, x="current_status", y="cnt", color="current_status",
-                             color_discrete_map=colors,
+                             color_discrete_map=STAGE_COLORS,
                              labels={"current_status": "Status", "cnt": "Count"})
-                fig.update_layout(showlegend=False, height=350, margin=dict(t=10))
-                st.plotly_chart(fig, key="funnel_chart")
+                fig.update_layout(showlegend=False)
+                apply_rw_layout(fig, height=340)
+                st.plotly_chart(fig, key="funnel")
             else:
                 st.info("No orders yet. Start generators from the sidebar.")
         except Exception as e:
@@ -194,8 +337,8 @@ with right:
         try:
             rows = query("SELECT * FROM mv_warehouse_load ORDER BY warehouse_id")
             if rows:
-                wh_df = pd.DataFrame(rows)
-                display = wh_df.rename(columns={
+                wh = pd.DataFrame(rows)
+                display = wh.rename(columns={
                     "warehouse_id": "Warehouse", "total_orders": "Total",
                     "pending": "Pending", "picking": "Picking", "packed": "Packed",
                     "shipped": "Shipped", "delayed": "Delayed", "total_delay_min": "Delay (min)",
@@ -207,11 +350,8 @@ with right:
                 melted = display.melt(id_vars=["Warehouse"], value_vars=available,
                                       var_name="Stage", value_name="Count")
                 fig = px.bar(melted, x="Warehouse", y="Count", color="Stage",
-                             color_discrete_map={
-                                 "Pending": "#3498db", "Picking": "#f39c12",
-                                 "Packed": "#9b59b6", "Shipped": "#2ecc71", "Delayed": "#e74c3c",
-                             })
-                fig.update_layout(height=250, margin=dict(t=10))
+                             color_discrete_map=STAGE_COLORS)
+                apply_rw_layout(fig, height=220)
                 st.plotly_chart(fig, key="wh_chart")
             else:
                 st.info("No warehouse data yet.")
@@ -220,9 +360,7 @@ with right:
 
     warehouse_load()
 
-st.divider()
-
-# ── Row 3: Fleet ETA + Delay Alerts (streaming) ─────────────────────────────
+# ── Row 3: Fleet ETA + Alerts ────────────────────────────────────────────────
 
 left2, right2 = st.columns(2)
 
@@ -280,15 +418,14 @@ with right2:
                     width="stretch", hide_index=True,
                 )
             else:
-                st.success("No active alerts.")
+                st.markdown(f'<p style="color:{SUCCESS};">No active alerts.</p>',
+                            unsafe_allow_html=True)
         except Exception as e:
             st.error(f"Error: {e}")
 
     delay_alerts()
 
-st.divider()
-
-# ── Row 4: AI Agent Actions (streaming) ─────────────────────────────────────
+# ── Row 4: AI Agent Actions ──────────────────────────────────────────────────
 
 st.subheader("AI Agent Actions")
 
@@ -322,17 +459,16 @@ def agent_actions():
                 width="stretch", hide_index=True,
             )
         else:
-            st.info("No agent actions yet. Trigger a disruption to see the agent respond.")
+            st.info("No agent actions yet. Trigger a disruption to see the AI agent respond.")
     except Exception as e:
         st.error(f"Error: {e}")
 
 
 agent_actions()
-st.divider()
 
-# ── Row 5: Cascade Impact (streaming) ────────────────────────────────────────
+# ── Row 5: Cascade Impact ───────────────────────────────────────────────────
 
-st.subheader("Cascade Impact — Disrupted Orders")
+st.subheader("Cascade Impact")
 
 
 @st.fragment(run_every=3)
@@ -355,7 +491,8 @@ def cascade_impact():
                 width="stretch", hide_index=True,
             )
         else:
-            st.success("No cascading disruptions.")
+            st.markdown(f'<p style="color:{SUCCESS};">No cascading disruptions.</p>',
+                        unsafe_allow_html=True)
     except Exception as e:
         st.error(f"Error: {e}")
 
