@@ -11,7 +11,7 @@ import plotly.express as px
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from db import query
+from db import query, query_batch
 
 # ── RisingWave brand tokens ─────────────────────────────────────────────────
 
@@ -223,7 +223,7 @@ with st.sidebar:
             execute(
                 """INSERT INTO warehouse_events
                    (event_id, order_id, warehouse_id, event_type, delay_minutes, detail)
-                   VALUES (%s, %s, %s, 'received', 0, 'Disruption resolved — order re-queued')""",
+                   VALUES (%s, %s, %s, 'received', 0, 'Disruption resolved, order re-queued')""",
                 (f"WE-{uuid.uuid4().hex[:8].upper()}", d["order_id"], d["warehouse_id"]),
             )
         return len(delayed)
@@ -231,7 +231,7 @@ with st.sidebar:
     if st.button("Resolve All Disruptions", use_container_width=True):
         count = _do_resolve()
         if count > 0:
-            st.toast(f"Resolved {count} disrupted orders — re-queued for processing.", icon="✅")
+            st.toast(f"Resolved {count} disrupted orders, re-queued for processing.", icon="✅")
         else:
             st.toast("No active disruptions to resolve.", icon="ℹ️")
 
@@ -277,7 +277,7 @@ MV_SQL = {
     "order_status": {
         "name": "mv_order_status",
         "explain": "Joins `orders` with `warehouse_events` to find each order's latest status. "
-                   "RisingWave keeps this **incrementally updated** — every new event instantly "
+                   "RisingWave keeps this **incrementally updated**, every new event instantly "
                    "refreshes the view without re-scanning the full table.",
         "sql": """\
 CREATE MATERIALIZED VIEW mv_order_status AS
@@ -291,7 +291,7 @@ ORDER BY o.order_id, we.created_at DESC;""",
     "warehouse_load": {
         "name": "mv_warehouse_load",
         "explain": "Aggregates order counts per warehouse per stage using `FILTER (WHERE ...)`. "
-                   "This is a **streaming GROUP BY** — RisingWave maintains the counts incrementally "
+                   "This is a **streaming GROUP BY**, RisingWave maintains the counts incrementally "
                    "as events arrive, not by re-aggregating all rows.",
         "sql": """\
 CREATE MATERIALIZED VIEW mv_warehouse_load AS
@@ -310,7 +310,7 @@ GROUP BY o.warehouse_id;""",
     "eta": {
         "name": "mv_eta_predictions",
         "explain": "Computes ETAs from live GPS speed and remaining stops. Uses a **compounding "
-                   "delay factor** — if speed drops below 25 mph, each remaining stop adds 15% more "
+                   "delay factor**, if speed drops below 25 mph, each remaining stop adds 15% more "
                    "delay. Confidence scores are derived from speed thresholds. All computed in "
                    "streaming SQL, no application code needed.",
         "sql": """\
@@ -334,7 +334,7 @@ LEFT JOIN (...latest GPS per truck...) gps ON s.truck_id = gps.truck_id;""",
         "name": "mv_delay_alerts",
         "explain": "Combines two alert sources with `UNION ALL`: warehouse delays >10 min "
                    "and shipments flagged as delayed by the ETA view. This MV **chains off another "
-                   "MV** (`mv_eta_predictions`) — RisingWave propagates changes through the DAG automatically.",
+                   "MV** (`mv_eta_predictions`), RisingWave propagates changes through the DAG automatically.",
         "sql": """\
 CREATE MATERIALIZED VIEW mv_delay_alerts AS
 SELECT 'warehouse' AS alert_source, we.warehouse_id AS source_id,
@@ -351,7 +351,7 @@ WHERE eta.delay_status = 'delayed';""",
         "name": "agent_actions (table)",
         "explain": "This is a regular table, not a materialized view. AI agents write their "
                    "decisions here (reroutes, notifications, escalations). The dashboard reads "
-                   "it like any other table — RisingWave serves it via the PostgreSQL protocol.",
+                   "it like any other table, RisingWave serves it via the PostgreSQL protocol.",
         "sql": """\
 CREATE TABLE agent_actions (
     action_id   VARCHAR PRIMARY KEY,
@@ -367,7 +367,7 @@ CREATE TABLE agent_actions (
         "name": "mv_cascade_impact",
         "explain": "A **multi-way streaming JOIN** across `warehouse_events`, `orders`, and "
                    "`shipments`. When a delay hits one warehouse, this view instantly shows "
-                   "every affected customer, shipment, and truck — the full blast radius. "
+                   "every affected customer, shipment, and truck, the full blast radius. "
                    "No batch job, no ETL pipeline.",
         "sql": """\
 CREATE MATERIALIZED VIEW mv_cascade_impact AS
@@ -390,7 +390,7 @@ def _show_sql(section_key: str):
     mv = MV_SQL.get(section_key)
     if not mv:
         return
-    with st.expander(f"**{mv['name']}** — How this works in RisingWave", expanded=False):
+    with st.expander(f"**{mv['name']}**, How this works in RisingWave", expanded=False):
         st.markdown(mv["explain"])
         st.code(mv["sql"], language="sql")
 
@@ -417,14 +417,11 @@ QUERIES = {
 
 @st.cache_data(ttl=3, show_spinner=False)
 def _fetch_all():
-    return {key: _safe_query(sql) for key, sql in QUERIES.items()}
-
-
-def _safe_query(sql):
+    """Fetch all dashboard data in one connection (1 TCP round-trip)."""
     try:
-        return query(sql)
+        return query_batch(QUERIES)
     except Exception:
-        return []
+        return {key: [] for key in QUERIES}
 
 
 # ── Static layout + independent streaming fragments ──────────────────────────
@@ -456,13 +453,13 @@ if st.session_state.get("show_sql"):
         "**What are Materialized Views?** "
         "In RisingWave, a materialized view is a SQL query whose result is **continuously maintained** "
         "as new data arrives. Unlike traditional databases that re-run the query on each read, "
-        "RisingWave incrementally updates only the affected rows — giving you fresh results in "
+        "RisingWave incrementally updates only the affected rows, giving you fresh results in "
         "milliseconds, not minutes. Each panel below is backed by a streaming MV. "
         "Expand any section to see the SQL.",
         icon="🌊",
     )
 
-st.caption("Live counters from RisingWave materialized views — updated every 5 seconds.")
+st.caption("Live counters from RisingWave materialized views, updated every 5 seconds.")
 kpi_slot = st.container()
 
 
@@ -582,7 +579,7 @@ with col_left2:
 with col_right2:
     st.subheader("Delay Alerts")
     st.caption("Warehouse delays >10min and shipments marked as delayed. "
-               "Backed by `mv_delay_alerts` — triggers AI agents.")
+               "Backed by `mv_delay_alerts`, triggers AI agents.")
     _show_sql("alerts")
 
     @st.fragment(run_every=5)

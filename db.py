@@ -31,3 +31,20 @@ def query(sql: str, params=None) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
+
+
+def query_batch(queries: dict[str, str]) -> dict[str, list[dict]]:
+    """Run multiple SELECTs on a single connection. Returns {key: rows}."""
+    conn = get_conn()
+    try:
+        results = {}
+        with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+            for key, sql in queries.items():
+                try:
+                    cur.execute(sql)
+                    results[key] = [dict(r) for r in cur.fetchall()]
+                except Exception:
+                    results[key] = []
+        return results
+    finally:
+        conn.close()
