@@ -195,7 +195,7 @@ with st.sidebar:
         wh_override = st.selectbox("Target Warehouse", s["warehouses"])
         st.caption(f"Delay: {s['delay_range'][0]}-{s['delay_range'][1]} min (randomized)")
 
-    if st.button("TRIGGER DISRUPTION", use_container_width=True):
+    if st.button("Trigger Disruption", use_container_width=True):
         from scripts.trigger_disruption import trigger
 
         if scenario_id == "random":
@@ -474,18 +474,11 @@ st.caption(f"Live counters from RisingWave materialized views, refreshing every 
 # ── All dashboard panels in one fragment (refresh controlled by sidebar) ──────
 
 
-@st.fragment(run_every=1)
+_refresh = st.session_state.get("_refresh_sec", 3)
+
+
+@st.fragment(run_every=_refresh)
 def _live_dashboard():
-    import time as _time
-
-    # Check if enough time has passed since last render
-    now = _time.time()
-    interval = st.session_state.get("_refresh_sec", 3)
-    last = st.session_state.get("_last_render", 0)
-    if now - last < interval:
-        return
-    st.session_state._last_render = now
-
     data = _fetch_all()
 
     # -- KPI Metrics --
