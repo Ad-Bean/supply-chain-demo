@@ -324,6 +324,7 @@ st.write("")
 
 # ── KPI Metrics ──────────────────────────────────────────────────────────────
 
+st.caption("Live counters from RisingWave materialized views — updated every 5 seconds.")
 kpi_slot = st.container()
 
 
@@ -356,6 +357,8 @@ col_left, col_right = st.columns(2)
 
 with col_left:
     st.subheader("Order Fulfillment")
+    st.caption("Each order flows: received → picking → packed → shipped. "
+               "Backed by `mv_order_status` materialized view.")
 
     @st.fragment(run_every=5)
     def _funnel():
@@ -378,6 +381,8 @@ with col_left:
 
 with col_right:
     st.subheader("Warehouse Load")
+    st.caption("Orders in each stage per warehouse. Red = delayed. "
+               "Backed by `mv_warehouse_load`.")
 
     @st.fragment(run_every=5)
     def _warehouse():
@@ -409,6 +414,8 @@ col_left2, col_right2 = st.columns(2)
 
 with col_left2:
     st.subheader("Fleet ETA Predictions")
+    st.caption("ETAs computed from GPS speed + remaining stops with compounding delay factor. "
+               "Backed by `mv_eta_predictions`.")
 
     @st.fragment(run_every=5)
     def _eta():
@@ -433,6 +440,8 @@ with col_left2:
 
 with col_right2:
     st.subheader("Delay Alerts")
+    st.caption("Warehouse delays >10min and shipments marked as delayed. "
+               "Backed by `mv_delay_alerts` — triggers AI agents.")
 
     @st.fragment(run_every=5)
     def _alerts():
@@ -457,6 +466,9 @@ with col_right2:
 # ── AI Agent Actions ─────────────────────────────────────────────────────────
 
 st.subheader("AI Agent Actions")
+st.caption("Autonomous actions taken by 3 AI agents: "
+           "Disruption Response (reroute/escalate), ETA Prediction, and Customer Notification. "
+           "Each action is logged to the `agent_actions` table in RisingWave.")
 
 
 @st.fragment(run_every=5)
@@ -489,6 +501,8 @@ _agent_actions()
 # ── Cascade Impact ───────────────────────────────────────────────────────────
 
 st.subheader("Cascade Impact")
+st.caption("When a warehouse is disrupted, this view joins across orders, shipments, and trucks "
+           "to show the full downstream blast radius. Backed by `mv_cascade_impact`.")
 
 
 @st.fragment(run_every=5)
