@@ -262,50 +262,41 @@ if st.session_state.get("show_sql"):
         icon="🌊",
     )
 
-_interval = st.session_state.get("_refresh_sec", 5)
-st.caption(f"Live data refreshes every {_interval}s. Charts update on page interaction.")
-
-# ── Charts (rendered once, no flicker) ───────────────────────────────────────
-# These render on initial load and update whenever the user interacts with
-# sidebar controls (toggle, trigger, reset). They do NOT re-render on the
-# fragment timer, so there's zero flicker.
-
-_initial_data = _fetch_all()
-
-col_l, col_r = st.columns(2)
-with col_l:
-    render_order_funnel(_initial_data)
-with col_r:
-    render_warehouse_load(_initial_data)
-
-render_fleet_map(_initial_data)
-
-# ── Live data fragment (tables + metrics only, no charts) ────────────────────
-# These elements are lightweight (text/numbers) and update smoothly without
-# visible flicker. Runs on the configurable refresh interval.
-
 _refresh = st.session_state.get("_refresh_sec", 5)
+st.caption(f"Tables refresh every {_refresh}s. Charts refresh every {_refresh * 3}s.")
+
+# ── Charts fragment (slow refresh — less flicker) ────────────────────────────
+# Charts are heavy DOM elements that flicker when rebuilt. We refresh them at
+# 3x the data interval to keep them reasonably current while minimizing flicker.
+
+
+@st.fragment(run_every=_refresh * 3)
+def _charts():
+    data = _fetch_all()
+    col_l, col_r = st.columns(2)
+    with col_l:
+        render_order_funnel(data)
+    with col_r:
+        render_warehouse_load(data)
+    render_fleet_map(data)
+
+
+_charts()
+
+# ── Live data fragment (tables + metrics — fast refresh, no flicker) ─────────
 
 
 @st.fragment(run_every=_refresh)
 def _live_data():
     data = _fetch_all()
-
-    # KPI metrics
     render_kpi(data)
     st.write("")
-
-    # ETA + Alerts (tables)
     col_l2, col_r2 = st.columns(2)
     with col_l2:
         render_eta(data)
     with col_r2:
         render_alerts(data)
-
-    # Agent Actions (metrics + table)
     render_agent_actions(data)
-
-    # Cascade Impact (table)
     render_cascade(data)
 
 
