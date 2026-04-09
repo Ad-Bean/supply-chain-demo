@@ -132,6 +132,7 @@ def _do_reset():
     st.session_state.agent_toggle = False
     from scripts.reset import main as reset_main
     reset_main()
+    _fetch_all.clear()
 
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
