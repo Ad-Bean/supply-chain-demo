@@ -163,6 +163,15 @@ with st.sidebar:
     show_sql = st.toggle("Show SQL", key="show_sql",
                          help="Reveal the RisingWave materialized view definitions behind each panel")
 
+    REFRESH_OPTIONS = {"1s": 1, "2s": 2, "3s": 3, "5s": 5, "10s": 10, "30s": 30}
+    refresh_label = st.selectbox(
+        "Refresh interval",
+        list(REFRESH_OPTIONS.keys()),
+        index=2,  # default 3s
+        help="How often the dashboard fetches fresh data from RisingWave",
+    )
+    st.session_state._refresh_sec = REFRESH_OPTIONS[refresh_label]
+
     st.divider()
 
     st.markdown(f'<p style="color:{ERROR};font-size:0.7rem;text-transform:uppercase;'
@@ -416,7 +425,7 @@ QUERIES = {
 }
 
 
-@st.cache_data(ttl=3, show_spinner=False)
+@st.cache_data(ttl=1, show_spinner=False)
 def _fetch_all():
     """Fetch all dashboard data in one connection (1 TCP round-trip)."""
     try:
@@ -460,13 +469,26 @@ if st.session_state.get("show_sql"):
         icon="🌊",
     )
 
-st.caption("Live counters from RisingWave materialized views, updated every 5 seconds.")
-kpi_slot = st.container()
+_interval = st.session_state.get("_refresh_sec", 3)
+st.caption(f"Live counters from RisingWave materialized views, refreshing every {_interval}s.")
+# ── All dashboard panels in one fragment (refresh controlled by sidebar) ──────
 
 
-@st.fragment(run_every=5)
-def _kpi():
+@st.fragment(run_every=1)
+def _live_dashboard():
+    import time as _time
+
+    # Check if enough time has passed since last render
+    now = _time.time()
+    interval = st.session_state.get("_refresh_sec", 3)
+    last = st.session_state.get("_last_render", 0)
+    if now - last < interval:
+        return
+    st.session_state._last_render = now
+
     data = _fetch_all()
+
+    # -- KPI Metrics --
     odf = pd.DataFrame(data["order_status"]) if data["order_status"] else pd.DataFrame(columns=["current_status", "cnt"])
     adf = pd.DataFrame(data["agent_counts"]) if data["agent_counts"] else pd.DataFrame(columns=["action_type", "cnt"])
 
@@ -481,25 +503,16 @@ def _kpi():
     c3.metric("Delayed", delayed)
     c4.metric("Agent Actions", agent_acts)
 
+    st.write("")
 
-with kpi_slot:
-    _kpi()
+    # -- Order Funnel + Warehouse Load --
+    col_left, col_right = st.columns(2)
 
-st.write("")
-
-# ── Order Funnel + Warehouse Load ────────────────────────────────────────────
-
-col_left, col_right = st.columns(2)
-
-with col_left:
-    st.subheader("Order Fulfillment")
-    st.caption("Each order flows: received → picking → packed → shipped. "
-               "Backed by `mv_order_status` materialized view.")
-    _show_sql("order_status")
-
-    @st.fragment(run_every=5)
-    def _funnel():
-        data = _fetch_all()
+    with col_left:
+        st.subheader("Order Fulfillment")
+        st.caption("Each order flows: received → picking → packed → shipped. "
+                   "Backed by `mv_order_status` materialized view.")
+        _show_sql("order_status")
         if data["order_status"]:
             df = pd.DataFrame(data["order_status"])
             cats = ["received", "picking", "packed", "shipped", "delay"]
@@ -514,17 +527,11 @@ with col_left:
         else:
             st.info("No orders yet. Start generators from the sidebar.")
 
-    _funnel()
-
-with col_right:
-    st.subheader("Warehouse Load")
-    st.caption("Orders in each stage per warehouse. Red = delayed. "
-               "Backed by `mv_warehouse_load`.")
-    _show_sql("warehouse_load")
-
-    @st.fragment(run_every=5)
-    def _warehouse():
-        data = _fetch_all()
+    with col_right:
+        st.subheader("Warehouse Load")
+        st.caption("Orders in each stage per warehouse. Red = delayed. "
+                   "Backed by `mv_warehouse_load`.")
+        _show_sql("warehouse_load")
         if data["warehouse_load"]:
             wh = pd.DataFrame(data["warehouse_load"])
             display = wh.rename(columns={
@@ -537,34 +544,27 @@ with col_right:
             available = [c for c in melt_cols if c in display.columns]
             melted = display.melt(id_vars=["Warehouse"], value_vars=available,
                                   var_name="Stage", value_name="Count")
-            fig = px.bar(melted, x="Warehouse", y="Count", color="Stage",
-                         color_discrete_map=STAGE_COLORS)
-            apply_rw_layout(fig, height=220)
-            st.plotly_chart(fig, key="wh_chart")
+            fig2 = px.bar(melted, x="Warehouse", y="Count", color="Stage",
+                          color_discrete_map=STAGE_COLORS)
+            apply_rw_layout(fig2, height=220)
+            st.plotly_chart(fig2, key="wh_chart")
         else:
             st.info("No warehouse data yet.")
 
-    _warehouse()
+    # -- Fleet ETA + Alerts --
+    col_left2, col_right2 = st.columns(2)
 
-# ── Fleet ETA + Alerts ───────────────────────────────────────────────────────
-
-col_left2, col_right2 = st.columns(2)
-
-with col_left2:
-    st.subheader("Fleet ETA Predictions")
-    st.caption("ETAs computed from GPS speed + remaining stops with compounding delay factor. "
-               "Backed by `mv_eta_predictions`.")
-    _show_sql("eta")
-
-    @st.fragment(run_every=5)
-    def _eta():
-        data = _fetch_all()
+    with col_left2:
+        st.subheader("Fleet ETA Predictions")
+        st.caption("ETAs computed from GPS speed + remaining stops with compounding delay factor. "
+                   "Backed by `mv_eta_predictions`.")
+        _show_sql("eta")
         if data["eta"]:
-            df = pd.DataFrame(data["eta"])
-            df["eta_minutes"] = df["eta_minutes"].apply(lambda x: round(float(x), 1) if x else None)
-            df["confidence"] = df["confidence"].apply(lambda x: round(float(x), 2) if x else None)
+            edf = pd.DataFrame(data["eta"])
+            edf["eta_minutes"] = edf["eta_minutes"].apply(lambda x: round(float(x), 1) if x else None)
+            edf["confidence"] = edf["confidence"].apply(lambda x: round(float(x), 2) if x else None)
             st.dataframe(
-                df.rename(columns={
+                edf.rename(columns={
                     "shipment_id": "Shipment", "truck_id": "Truck",
                     "remaining_stops": "Stops Left", "speed_mph": "Speed",
                     "eta_minutes": "ETA (min)", "delay_status": "Status",
@@ -575,22 +575,16 @@ with col_left2:
         else:
             st.info("No active shipments.")
 
-    _eta()
-
-with col_right2:
-    st.subheader("Delay Alerts")
-    st.caption("Warehouse delays >10min and shipments marked as delayed. "
-               "Backed by `mv_delay_alerts`, triggers AI agents.")
-    _show_sql("alerts")
-
-    @st.fragment(run_every=5)
-    def _alerts():
-        data = _fetch_all()
+    with col_right2:
+        st.subheader("Delay Alerts")
+        st.caption("Warehouse delays >10min and shipments marked as delayed. "
+                   "Backed by `mv_delay_alerts`, triggers AI agents.")
+        _show_sql("alerts")
         if data["alerts"]:
-            df = pd.DataFrame(data["alerts"])
-            df["created_at"] = pd.to_datetime(df["created_at"])
+            aldf = pd.DataFrame(data["alerts"])
+            aldf["created_at"] = pd.to_datetime(aldf["created_at"])
             st.dataframe(
-                df.rename(columns={
+                aldf.rename(columns={
                     "alert_source": "Source", "source_id": "Origin",
                     "affected_id": "Order", "delay_minutes": "Delay (min)",
                     "reason": "Reason", "created_at": "Time",
@@ -601,32 +595,24 @@ with col_right2:
             st.markdown(f'<p style="color:{SUCCESS};">No active alerts.</p>',
                         unsafe_allow_html=True)
 
-    _alerts()
-
-# ── AI Agent Actions ─────────────────────────────────────────────────────────
-
-st.subheader("AI Agent Actions")
-st.caption("Autonomous actions taken by 3 AI agents: "
-           "Disruption Response (reroute/escalate), ETA Prediction, and Customer Notification. "
-           "Each action is logged to the `agent_actions` table in RisingWave.")
-_show_sql("actions")
-
-
-@st.fragment(run_every=5)
-def _agent_actions():
-    data = _fetch_all()
+    # -- AI Agent Actions --
+    st.subheader("AI Agent Actions")
+    st.caption("Autonomous actions taken by 3 AI agents: "
+               "Disruption Response (reroute/escalate), ETA Prediction, and Customer Notification. "
+               "Each action is logged to the `agent_actions` table in RisingWave.")
+    _show_sql("actions")
     if data["actions"]:
-        df = pd.DataFrame(data["actions"])
-        df["created_at"] = pd.to_datetime(df["created_at"])
-        reroutes = len(df[df["action_type"] == "reroute"])
-        notifies = len(df[df["action_type"] == "notify"])
-        escalations = len(df[df["action_type"] == "escalate"])
-        c1, c2, c3 = st.columns(3)
-        c1.metric("Reroutes", reroutes)
-        c2.metric("Notifications", notifies)
-        c3.metric("Escalations", escalations)
+        acdf = pd.DataFrame(data["actions"])
+        acdf["created_at"] = pd.to_datetime(acdf["created_at"])
+        reroutes = len(acdf[acdf["action_type"] == "reroute"])
+        notifies = len(acdf[acdf["action_type"] == "notify"])
+        escalations = len(acdf[acdf["action_type"] == "escalate"])
+        mc1, mc2, mc3 = st.columns(3)
+        mc1.metric("Reroutes", reroutes)
+        mc2.metric("Notifications", notifies)
+        mc3.metric("Escalations", escalations)
         st.dataframe(
-            df.rename(columns={
+            acdf.rename(columns={
                 "agent_name": "Agent", "action_type": "Action",
                 "target_id": "Target", "reasoning": "Reasoning",
                 "detail": "Detail", "created_at": "Time",
@@ -636,24 +622,15 @@ def _agent_actions():
     else:
         st.info("No agent actions yet. Trigger a disruption to see the AI agent respond.")
 
-
-_agent_actions()
-
-# ── Cascade Impact ───────────────────────────────────────────────────────────
-
-st.subheader("Cascade Impact")
-st.caption("When a warehouse is disrupted, this view joins across orders, shipments, and trucks "
-           "to show the full downstream blast radius. Backed by `mv_cascade_impact`.")
-_show_sql("cascade")
-
-
-@st.fragment(run_every=5)
-def _cascade():
-    data = _fetch_all()
+    # -- Cascade Impact --
+    st.subheader("Cascade Impact")
+    st.caption("When a warehouse is disrupted, this view joins across orders, shipments, and trucks "
+               "to show the full downstream blast radius. Backed by `mv_cascade_impact`.")
+    _show_sql("cascade")
     if data["cascade"]:
-        df = pd.DataFrame(data["cascade"])
+        cdf = pd.DataFrame(data["cascade"])
         st.dataframe(
-            df.rename(columns={
+            cdf.rename(columns={
                 "warehouse_id": "Warehouse", "warehouse_delay_min": "Delay (min)",
                 "order_id": "Order", "customer_name": "Customer",
                 "priority": "Priority", "shipment_id": "Shipment",
@@ -666,4 +643,4 @@ def _cascade():
                     unsafe_allow_html=True)
 
 
-_cascade()
+_live_dashboard()
