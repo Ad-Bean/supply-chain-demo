@@ -317,59 +317,35 @@ st.write("")
 
 # ── Cached data layer — single fetch, shared across all panels ───────────────
 
+QUERIES = {
+    "order_status":   "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status GROUP BY current_status",
+    "agent_counts":   "SELECT action_type, COUNT(*) AS cnt FROM agent_actions GROUP BY action_type",
+    "warehouse_load": "SELECT * FROM mv_warehouse_load ORDER BY warehouse_id",
+    "eta":            "SELECT shipment_id, truck_id, remaining_stops, speed_mph, "
+                      "eta_minutes, delay_status, confidence "
+                      "FROM mv_eta_predictions WHERE remaining_stops > 0 "
+                      "ORDER BY eta_minutes DESC LIMIT 15",
+    "alerts":         "SELECT alert_source, source_id, affected_id, delay_minutes, reason, created_at "
+                      "FROM mv_delay_alerts ORDER BY created_at DESC LIMIT 15",
+    "actions":        "SELECT agent_name, action_type, target_id, reasoning, detail, created_at "
+                      "FROM agent_actions ORDER BY created_at DESC LIMIT 20",
+    "cascade":        "SELECT warehouse_id, warehouse_delay_min, order_id, customer_name, "
+                      "priority, shipment_id, truck_id, destination "
+                      "FROM mv_cascade_impact ORDER BY priority, warehouse_delay_min DESC",
+}
+
 
 @st.cache_data(ttl=3)
 def _fetch_all():
     """Fetch all dashboard data in one batch. Cached for 3 seconds."""
-    data = {}
+    return {key: _safe_query(sql) for key, sql in QUERIES.items()}
+
+
+def _safe_query(sql):
     try:
-        data["order_status"] = query(
-            "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status GROUP BY current_status"
-        )
+        return query(sql)
     except Exception:
-        data["order_status"] = []
-    try:
-        data["agent_counts"] = query(
-            "SELECT action_type, COUNT(*) AS cnt FROM agent_actions GROUP BY action_type"
-        )
-    except Exception:
-        data["agent_counts"] = []
-    try:
-        data["warehouse_load"] = query("SELECT * FROM mv_warehouse_load ORDER BY warehouse_id")
-    except Exception:
-        data["warehouse_load"] = []
-    try:
-        data["eta"] = query(
-            "SELECT shipment_id, truck_id, remaining_stops, speed_mph, "
-            "eta_minutes, delay_status, confidence "
-            "FROM mv_eta_predictions WHERE remaining_stops > 0 "
-            "ORDER BY eta_minutes DESC LIMIT 15"
-        )
-    except Exception:
-        data["eta"] = []
-    try:
-        data["alerts"] = query(
-            "SELECT alert_source, source_id, affected_id, delay_minutes, reason, created_at "
-            "FROM mv_delay_alerts ORDER BY created_at DESC LIMIT 15"
-        )
-    except Exception:
-        data["alerts"] = []
-    try:
-        data["actions"] = query(
-            "SELECT agent_name, action_type, target_id, reasoning, detail, created_at "
-            "FROM agent_actions ORDER BY created_at DESC LIMIT 20"
-        )
-    except Exception:
-        data["actions"] = []
-    try:
-        data["cascade"] = query(
-            "SELECT warehouse_id, warehouse_delay_min, order_id, customer_name, "
-            "priority, shipment_id, truck_id, destination "
-            "FROM mv_cascade_impact ORDER BY priority, warehouse_delay_min DESC"
-        )
-    except Exception:
-        data["cascade"] = []
-    return data
+        return []
 
 
 # ── Single streaming fragment — one refresh, all panels ──────────────────────
