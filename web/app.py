@@ -29,7 +29,7 @@ WARNING = "#F59E0B"
 ERROR = "#EF4444"
 
 RW_LOGO = "https://www.risingwave.com/_next/static/media/risingwave-logo-white-text.86234334.svg"
-RW_ICON = "https://cdn.hashnode.com/res/hashnode/image/upload/v1692874188594/TFRPvivYP.png?w=64&h=64&auto=compress,format&format=webp"
+RW_ICON = "https://www.risingwave.com/metadata/icon.svg"
 RW_URL = "https://www.risingwave.com"
 RW_DOCS = "https://docs.risingwave.com"
 RW_GITHUB = "https://github.com/risingwavelabs/risingwave"
