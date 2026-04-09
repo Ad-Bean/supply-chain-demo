@@ -15,7 +15,6 @@ import sys
 
 from rich.console import Console
 from rich.panel import Panel
-from rich.live import Live
 from rich.table import Table
 
 from scripts.reset import main as reset_data

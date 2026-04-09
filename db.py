@@ -31,9 +31,3 @@ def query(sql: str, params=None) -> list[dict]:
             return [dict(r) for r in cur.fetchall()]
     finally:
         conn.close()
-
-
-def query_one(sql: str, params=None) -> dict | None:
-    """Run a SELECT and return the first row as a dict, or None."""
-    rows = query(sql, params)
-    return rows[0] if rows else None
