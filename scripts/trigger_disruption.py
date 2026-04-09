@@ -14,11 +14,14 @@ from db import execute, query
 from generators.seed_data import WAREHOUSES
 
 
-def trigger(warehouse_id: str | None = None, delay_minutes: int = 45):
+def trigger(warehouse_id: str | None = None, delay_minutes: int = 45,
+            detail: str | None = None) -> int:
+    """Inject delay events. Returns number of affected orders."""
     if warehouse_id is None:
         warehouse_id = random.choice(WAREHOUSES)["id"]
+    if detail is None:
+        detail = f"MAJOR DISRUPTION: Equipment failure — all operations halted for {delay_minutes}min"
 
-    # Find orders currently in this warehouse (not yet shipped)
     pending = query("""
         SELECT DISTINCT o.order_id, o.customer_name, o.priority
         FROM orders o
@@ -33,7 +36,7 @@ def trigger(warehouse_id: str | None = None, delay_minutes: int = 45):
 
     if not pending:
         print(f"No pending orders at {warehouse_id}. Generate some orders first.")
-        return
+        return 0
 
     print(f"\n{'='*60}")
     print(f"  DISRUPTION TRIGGERED @ {warehouse_id}")
@@ -47,13 +50,13 @@ def trigger(warehouse_id: str | None = None, delay_minutes: int = 45):
             """INSERT INTO warehouse_events (event_id, order_id, warehouse_id,
                event_type, delay_minutes, detail)
                VALUES (%s, %s, %s, 'delay', %s, %s)""",
-            (event_id, order["order_id"], warehouse_id, delay_minutes,
-             f"MAJOR DISRUPTION: Equipment failure — all operations halted for {delay_minutes}min"),
+            (event_id, order["order_id"], warehouse_id, delay_minutes, detail),
         )
-        print(f"  ⚠ {order['order_id']}  {order['customer_name']:20s}  "
+        print(f"  {order['order_id']}  {order['customer_name']:20s}  "
               f"priority={order['priority']}")
 
-    print(f"\n  {len(pending)} delay events injected. Agent should pick these up shortly.\n")
+    print(f"\n  {len(pending)} delay events injected.\n")
+    return len(pending)
 
 
 if __name__ == "__main__":

@@ -158,12 +158,40 @@ with st.sidebar:
                 f'letter-spacing:0.1em;margin-bottom:8px;">Simulate Disruption</p>',
                 unsafe_allow_html=True)
 
-    wh = st.selectbox("Warehouse", ["WH-01", "WH-02", "WH-03"], index=2)
-    delay = st.slider("Delay (minutes)", 15, 90, 45)
+    from generators.scenarios import SCENARIOS, pick_random_scenario, resolve_scenario
+
+    scenario_options = {f"{s['icon']} {s['name']}": s["id"] for s in SCENARIOS}
+    scenario_options["🎲 Random Scenario"] = "random"
+
+    selected = st.selectbox("Scenario", list(scenario_options.keys()), index=len(scenario_options) - 1)
+    scenario_id = scenario_options[selected]
+
+    if scenario_id == "random":
+        # Show preview of what random might pick
+        st.caption("A random disruption will strike a random warehouse.")
+    else:
+        s = next(s for s in SCENARIOS if s["id"] == scenario_id)
+        wh_override = st.selectbox("Target Warehouse", s["warehouses"])
+        st.caption(f"Delay: {s['delay_range'][0]}-{s['delay_range'][1]} min (randomized)")
+
     if st.button("TRIGGER DISRUPTION", use_container_width=True):
         from scripts.trigger_disruption import trigger
-        trigger(wh, delay)
-        st.toast(f"Disruption triggered at {wh} ({delay}min)!", icon="🚨")
+
+        if scenario_id == "random":
+            resolved = pick_random_scenario()
+        else:
+            resolved = resolve_scenario(scenario_id, wh_override)
+
+        affected = trigger(resolved["warehouse"], resolved["delay"], resolved["detail"])
+
+        if affected > 0:
+            st.toast(
+                f"{resolved['icon']} {resolved['name']} at {resolved['warehouse']} "
+                f"— {resolved['delay']}min delay, {affected} orders affected!",
+                icon="🚨",
+            )
+        else:
+            st.toast("No pending orders to disrupt. Let generators run a bit.", icon="⚠️")
 
     st.divider()
 
