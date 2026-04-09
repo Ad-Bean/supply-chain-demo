@@ -268,9 +268,6 @@ def _safe_query(sql):
 
 st.markdown(f"""
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
-    <a href="{RW_URL}" target="_blank">
-        <img src="{RW_ICON}" alt="RisingWave" style="height:36px;border-radius:6px;" />
-    </a>
     <div>
         <h1 style="margin:0;font-size:1.6rem;color:#FFFFFF;font-weight:400;">
             Supply Chain Control Tower
