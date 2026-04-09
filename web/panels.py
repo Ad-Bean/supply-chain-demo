@@ -1,10 +1,17 @@
-"""Dashboard panel rendering functions."""
+"""Dashboard panel rendering functions.
+
+Panels are split into two categories:
+- "live" panels (KPIs, tables) — refresh inside @st.fragment, no flicker
+- "chart" panels (bar charts, map) — render outside the fragment so they
+  don't get destroyed/recreated on every refresh cycle. They update on
+  sidebar interactions or manual refresh.
+"""
 
 import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from web.theme import STAGE_COLORS, SUCCESS, BRAND_GREEN, ERROR
+from web.theme import STAGE_COLORS, SUCCESS, BRAND_GREEN, ERROR, apply_rw_layout
 from web.sql_docs import show_sql
 
 
@@ -34,11 +41,12 @@ def render_order_funnel(data: dict):
         cats = ["received", "picking", "packed", "shipped", "delay"]
         df["current_status"] = pd.Categorical(df["current_status"], categories=cats, ordered=True)
         df = df.sort_values("current_status").dropna(subset=["current_status"])
-        # Pivot each status into its own column so st.bar_chart can color them
-        chart_df = df.set_index("current_status")["cnt"].to_dict()
-        chart_data = pd.DataFrame([chart_df], index=["count"]).fillna(0).astype(int)
-        colors = [STAGE_COLORS.get(c, "#888") for c in chart_data.columns]
-        st.bar_chart(chart_data, color=colors, height=340)
+        fig = px.bar(df, x="current_status", y="cnt", color="current_status",
+                     color_discrete_map=STAGE_COLORS,
+                     labels={"current_status": "Status", "cnt": "Count"})
+        fig.update_layout(showlegend=False)
+        apply_rw_layout(fig, height=340)
+        st.plotly_chart(fig, key="funnel")
     else:
         st.info("No orders yet. Start generators from the sidebar.")
 

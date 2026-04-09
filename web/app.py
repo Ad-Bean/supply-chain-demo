@@ -263,62 +263,50 @@ if st.session_state.get("show_sql"):
     )
 
 _interval = st.session_state.get("_refresh_sec", 5)
-st.caption(f"Live counters from RisingWave materialized views, refreshing every {_interval}s.")
+st.caption(f"Live data refreshes every {_interval}s. Charts update on page interaction.")
 
-# ── Live dashboard fragment ──────────────────────────────────────────────────
-#
-# Optimization: hash the fetched data and skip re-rendering when nothing changed.
-# This eliminates chart flicker entirely during idle periods. When data IS changing,
-# the charts must rebuild (Streamlit limitation), but at least we don't flicker
-# on no-op refreshes.
+# ── Charts (rendered once, no flicker) ───────────────────────────────────────
+# These render on initial load and update whenever the user interacts with
+# sidebar controls (toggle, trigger, reset). They do NOT re-render on the
+# fragment timer, so there's zero flicker.
+
+_initial_data = _fetch_all()
+
+col_l, col_r = st.columns(2)
+with col_l:
+    render_order_funnel(_initial_data)
+with col_r:
+    render_warehouse_load(_initial_data)
+
+render_fleet_map(_initial_data)
+
+# ── Live data fragment (tables + metrics only, no charts) ────────────────────
+# These elements are lightweight (text/numbers) and update smoothly without
+# visible flicker. Runs on the configurable refresh interval.
 
 _refresh = st.session_state.get("_refresh_sec", 5)
 
 
-def _data_hash(data: dict) -> int:
-    """Fast hash of query results to detect changes."""
-    return hash(str(data))
-
-
 @st.fragment(run_every=_refresh)
-def _live_dashboard():
+def _live_data():
     data = _fetch_all()
 
-    # Skip full re-render if data hasn't changed
-    new_hash = _data_hash(data)
-    prev_hash = st.session_state.get("_data_hash")
-    if prev_hash == new_hash:
-        # Data unchanged — render from cached previous output
-        # We still must emit content (can't return empty), so we render normally
-        # but Streamlit's key-based diffing will avoid DOM thrashing for keyed charts
-        pass
-    st.session_state._data_hash = new_hash
-
+    # KPI metrics
     render_kpi(data)
     st.write("")
 
-    # Row 2: Order Funnel + Warehouse Load
-    col_l, col_r = st.columns(2)
-    with col_l:
-        render_order_funnel(data)
-    with col_r:
-        render_warehouse_load(data)
-
-    # Row 3: Fleet Map (full width)
-    render_fleet_map(data)
-
-    # Row 4: ETA + Alerts
+    # ETA + Alerts (tables)
     col_l2, col_r2 = st.columns(2)
     with col_l2:
         render_eta(data)
     with col_r2:
         render_alerts(data)
 
-    # Row 5: Agent Actions
+    # Agent Actions (metrics + table)
     render_agent_actions(data)
 
-    # Row 6: Cascade Impact
+    # Cascade Impact (table)
     render_cascade(data)
 
 
-_live_dashboard()
+_live_data()
