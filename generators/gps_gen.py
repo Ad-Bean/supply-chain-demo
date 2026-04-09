@@ -15,26 +15,19 @@ WH_COORDS = {wh["id"]: (wh["lat"], wh["lon"]) for wh in WAREHOUSES}
 def get_active_trucks() -> list[dict]:
     """Trucks with shipments that still have remaining stops > 0."""
     return query("""
-        SELECT DISTINCT s.truck_id, s.warehouse_id, s.total_stops,
-               COALESCE(
-                   (SELECT gps.remaining_stops FROM gps_pings gps
-                    WHERE gps.truck_id = s.truck_id
-                    ORDER BY gps.created_at DESC LIMIT 1),
-                   s.total_stops
-               ) AS remaining_stops,
-               COALESCE(
-                   (SELECT gps.lat FROM gps_pings gps
-                    WHERE gps.truck_id = s.truck_id
-                    ORDER BY gps.created_at DESC LIMIT 1),
-                   0
-               ) AS last_lat,
-               COALESCE(
-                   (SELECT gps.lon FROM gps_pings gps
-                    WHERE gps.truck_id = s.truck_id
-                    ORDER BY gps.created_at DESC LIMIT 1),
-                   0
-               ) AS last_lon
-        FROM shipments s
+        SELECT s.truck_id, s.warehouse_id, s.total_stops,
+               COALESCE(gps.remaining_stops, s.total_stops) AS remaining_stops,
+               COALESCE(gps.lat, 0) AS last_lat,
+               COALESCE(gps.lon, 0) AS last_lon
+        FROM (
+            SELECT DISTINCT ON (truck_id) truck_id, warehouse_id, total_stops
+            FROM shipments ORDER BY truck_id, created_at DESC
+        ) s
+        LEFT JOIN (
+            SELECT DISTINCT ON (truck_id) truck_id, remaining_stops, lat, lon
+            FROM gps_pings ORDER BY truck_id, created_at DESC
+        ) gps ON s.truck_id = gps.truck_id
+        WHERE COALESCE(gps.remaining_stops, s.total_stops) > 0
     """)
 
 

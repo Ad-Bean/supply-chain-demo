@@ -31,7 +31,7 @@ def trigger(warehouse_id: str | None = None, delay_minutes: int = 45,
             ORDER BY order_id, created_at DESC
         ) we ON o.order_id = we.order_id
         WHERE o.warehouse_id = %s
-          AND COALESCE(we.event_type, 'new') NOT IN ('shipped')
+          AND COALESCE(we.event_type, 'new') NOT IN ('shipped', 'delay')
     """, (warehouse_id,))
 
     if not pending:

@@ -98,6 +98,7 @@ def run_agent_loop(alert: dict) -> str:
     ]
 
     actions_taken = []
+    response = None
     for turn in range(6):
         try:
             response = chat(messages, tools=ACTION_TOOLS)
@@ -136,10 +137,7 @@ def run_agent_loop(alert: dict) -> str:
                 "content": result,
             })
 
-    try:
-        summary = response.content if response.content else None
-    except NameError:
-        summary = None
+    summary = response.content if response and response.content else None
     if not summary:
         summary = f"Completed {len(actions_taken)} actions:\n" + "\n".join(f"  - {a}" for a in actions_taken)
     console.print(Panel(summary, title="Agent — RESOLUTION", border_style="green"))

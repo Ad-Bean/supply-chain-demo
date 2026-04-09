@@ -173,6 +173,7 @@ with st.sidebar:
 
     selected = st.selectbox("Scenario", list(scenario_options.keys()), index=len(scenario_options) - 1)
     scenario_id = scenario_options[selected]
+    wh_override = None
 
     if scenario_id == "random":
         # Show preview of what random might pick

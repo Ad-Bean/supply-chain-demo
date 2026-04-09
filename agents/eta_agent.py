@@ -46,7 +46,7 @@ def get_low_confidence_shipments() -> list[dict]:
         SELECT shipment_id, truck_id, remaining_stops, speed_mph,
                eta_minutes, delay_status, confidence, destination
         FROM mv_eta_predictions
-        WHERE remaining_stops > 0 AND confidence < 0.8
+        WHERE remaining_stops > 0 AND confidence < 0.8 AND eta_minutes IS NOT NULL
         ORDER BY confidence ASC
         LIMIT 5
     """)
@@ -63,7 +63,7 @@ def enrich_eta(shipment: dict):
                 f"- Destination: {shipment['destination']}\n"
                 f"- Current speed: {shipment['speed_mph']} mph\n"
                 f"- Remaining stops: {shipment['remaining_stops']}\n"
-                f"- Basic ETA: {shipment['eta_minutes']:.1f} min\n"
+                f"- Basic ETA: {float(shipment['eta_minutes'] or 0):.1f} min\n"
                 f"- Current status: {shipment['delay_status']}\n"
                 f"- Confidence: {shipment['confidence']}\n\n"
                 f"Provide an adjusted ETA prediction."

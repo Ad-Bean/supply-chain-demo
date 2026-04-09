@@ -23,18 +23,24 @@ def get_pending_orders() -> list[dict]:
                    'new'
                ) AS current_status
         FROM orders o
+        WHERE NOT EXISTS (
+            SELECT 1 FROM warehouse_events we
+            WHERE we.order_id = o.order_id AND we.event_type = 'shipped'
+        )
         ORDER BY o.created_at
+        LIMIT 50
     """)
 
 
 def next_event_type(current: str) -> str | None:
     if current == "new":
         return "received"
+    if current == "delay":
+        return "received"  # re-enter pipeline after delay
     try:
         idx = PIPELINE.index(current)
         return PIPELINE[idx + 1] if idx + 1 < len(PIPELINE) else None
     except ValueError:
-        # After a delay, resume from where it was — treat delay as no progression
         return None
 
 

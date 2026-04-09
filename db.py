@@ -13,18 +13,24 @@ def get_conn():
 
 def execute(sql: str, params=None):
     """Execute a statement (INSERT / DDL) and commit."""
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
         with conn.cursor() as cur:
             cur.execute(sql, params)
         conn.commit()
+    finally:
+        conn.close()
 
 
 def query(sql: str, params=None) -> list[dict]:
     """Run a SELECT and return rows as dicts."""
-    with get_conn() as conn:
+    conn = get_conn()
+    try:
         with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
             cur.execute(sql, params)
             return [dict(r) for r in cur.fetchall()]
+    finally:
+        conn.close()
 
 
 def query_one(sql: str, params=None) -> dict | None:

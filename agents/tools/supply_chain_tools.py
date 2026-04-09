@@ -186,7 +186,7 @@ def notify_customer(order_id: str, message: str) -> str:
         """INSERT INTO agent_actions (action_id, agent_name, action_type,
            target_id, reasoning, detail)
            VALUES (%s, %s, %s, %s, %s, %s)""",
-        (action_id, "notification_agent", "notify", order_id,
+        (action_id, "disruption_agent", "notify", order_id,
          "Customer delay notification", message),
     )
     return json.dumps({"status": "sent", "action_id": action_id,
