@@ -29,6 +29,7 @@ WARNING = "#F59E0B"
 ERROR = "#EF4444"
 
 RW_LOGO = "https://www.risingwave.com/_next/static/media/risingwave-logo-white-text.86234334.svg"
+RW_ICON = "https://cdn.hashnode.com/res/hashnode/image/upload/v1692874188594/TFRPvivYP.png?w=64&h=64&auto=compress,format&format=webp"
 RW_URL = "https://www.risingwave.com"
 RW_DOCS = "https://docs.risingwave.com"
 RW_GITHUB = "https://github.com/risingwavelabs/risingwave"
@@ -43,7 +44,7 @@ STAGE_COLORS = {
 
 st.set_page_config(
     page_title="RisingWave | Supply Chain Control Tower",
-    page_icon="🌊",
+    page_icon=RW_ICON,
     layout="wide",
 )
 
@@ -268,7 +269,7 @@ def _safe_query(sql):
 st.markdown(f"""
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
     <a href="{RW_URL}" target="_blank">
-        <img src="{RW_LOGO}" alt="RisingWave" style="height:24px;" />
+        <img src="{RW_ICON}" alt="RisingWave" style="height:36px;border-radius:6px;" />
     </a>
     <div>
         <h1 style="margin:0;font-size:1.6rem;color:#FFFFFF;font-weight:400;">
