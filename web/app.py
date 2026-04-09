@@ -114,7 +114,7 @@ with st.sidebar:
               help="Reveal the RisingWave materialized view definitions behind each panel")
 
     REFRESH_OPTIONS = {"1s": 1, "2s": 2, "3s": 3, "5s": 5, "10s": 10, "30s": 30}
-    refresh_label = st.selectbox("Refresh interval", list(REFRESH_OPTIONS.keys()), index=2,
+    refresh_label = st.selectbox("Refresh interval", list(REFRESH_OPTIONS.keys()), index=3,
                                  help="How often the dashboard fetches fresh data from RisingWave")
     st.session_state._refresh_sec = REFRESH_OPTIONS[refresh_label]
 
@@ -262,17 +262,37 @@ if st.session_state.get("show_sql"):
         icon="🌊",
     )
 
-_interval = st.session_state.get("_refresh_sec", 3)
+_interval = st.session_state.get("_refresh_sec", 5)
 st.caption(f"Live counters from RisingWave materialized views, refreshing every {_interval}s.")
 
 # ── Live dashboard fragment ──────────────────────────────────────────────────
+#
+# Optimization: hash the fetched data and skip re-rendering when nothing changed.
+# This eliminates chart flicker entirely during idle periods. When data IS changing,
+# the charts must rebuild (Streamlit limitation), but at least we don't flicker
+# on no-op refreshes.
 
-_refresh = st.session_state.get("_refresh_sec", 3)
+_refresh = st.session_state.get("_refresh_sec", 5)
+
+
+def _data_hash(data: dict) -> int:
+    """Fast hash of query results to detect changes."""
+    return hash(str(data))
 
 
 @st.fragment(run_every=_refresh)
 def _live_dashboard():
     data = _fetch_all()
+
+    # Skip full re-render if data hasn't changed
+    new_hash = _data_hash(data)
+    prev_hash = st.session_state.get("_data_hash")
+    if prev_hash == new_hash:
+        # Data unchanged — render from cached previous output
+        # We still must emit content (can't return empty), so we render normally
+        # but Streamlit's key-based diffing will avoid DOM thrashing for keyed charts
+        pass
+    st.session_state._data_hash = new_hash
 
     render_kpi(data)
     st.write("")

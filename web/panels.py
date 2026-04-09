@@ -4,7 +4,7 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from web.theme import STAGE_COLORS, SUCCESS, apply_rw_layout, BG_CARD, BRAND_GREEN, ERROR
+from web.theme import STAGE_COLORS, SUCCESS, BRAND_GREEN, ERROR
 from web.sql_docs import show_sql
 
 
@@ -34,12 +34,9 @@ def render_order_funnel(data: dict):
         cats = ["received", "picking", "packed", "shipped", "delay"]
         df["current_status"] = pd.Categorical(df["current_status"], categories=cats, ordered=True)
         df = df.sort_values("current_status").dropna(subset=["current_status"])
-        fig = px.bar(df, x="current_status", y="cnt", color="current_status",
-                     color_discrete_map=STAGE_COLORS,
-                     labels={"current_status": "Status", "cnt": "Count"})
-        fig.update_layout(showlegend=False)
-        apply_rw_layout(fig, height=340)
-        st.plotly_chart(fig, key="funnel")
+        chart_df = df.set_index("current_status")[["cnt"]].rename(columns={"cnt": "Orders"})
+        colors = [STAGE_COLORS.get(s, "#888") for s in chart_df.index]
+        st.bar_chart(chart_df, color=colors, height=340)
     else:
         st.info("No orders yet. Start generators from the sidebar.")
 
@@ -57,14 +54,6 @@ def render_warehouse_load(data: dict):
             "shipped": "Shipped", "delayed": "Delayed", "total_delay_min": "Delay (min)",
         })
         st.dataframe(display, width="stretch", hide_index=True)
-        melt_cols = ["Pending", "Picking", "Packed", "Shipped", "Delayed"]
-        available = [c for c in melt_cols if c in display.columns]
-        melted = display.melt(id_vars=["Warehouse"], value_vars=available,
-                              var_name="Stage", value_name="Count")
-        fig = px.bar(melted, x="Warehouse", y="Count", color="Stage",
-                     color_discrete_map=STAGE_COLORS)
-        apply_rw_layout(fig, height=220)
-        st.plotly_chart(fig, key="wh_chart")
     else:
         st.info("No warehouse data yet.")
 
