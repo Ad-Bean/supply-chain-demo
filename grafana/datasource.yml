@@ -1,0 +1,19 @@
+# Grafana provisioning — datasource pointing to RisingWave Cloud
+# Copy this to grafana/provisioning/datasources/ when running Grafana
+
+apiVersion: 1
+
+datasources:
+  - name: RisingWave
+    type: postgres
+    access: proxy
+    url: ${RW_HOST}:${RW_PORT}
+    database: ${RW_DATABASE}
+    user: ${RW_USER}
+    secureJsonData:
+      password: ${RW_PASSWORD}
+    jsonData:
+      sslmode: require
+      postgresVersion: 1300  # PG 13 compatible
+    isDefault: true
+    editable: true

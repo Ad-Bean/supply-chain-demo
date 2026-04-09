@@ -1,0 +1,149 @@
+{
+  "dashboard": {
+    "title": "Supply Chain Control Tower",
+    "tags": ["risingwave", "supply-chain", "demo"],
+    "timezone": "browser",
+    "refresh": "5s",
+    "time": { "from": "now-1h", "to": "now" },
+    "panels": [
+      {
+        "id": 1,
+        "title": "Order Fulfillment Funnel",
+        "type": "piechart",
+        "gridPos": { "h": 8, "w": 8, "x": 0, "y": 0 },
+        "targets": [
+          {
+            "rawSql": "SELECT current_status AS metric, COUNT(*) AS value FROM mv_order_status GROUP BY current_status ORDER BY value DESC",
+            "format": "table",
+            "datasource": "RisingWave"
+          }
+        ]
+      },
+      {
+        "id": 2,
+        "title": "Warehouse Load",
+        "type": "table",
+        "gridPos": { "h": 8, "w": 8, "x": 8, "y": 0 },
+        "targets": [
+          {
+            "rawSql": "SELECT warehouse_id AS \"Warehouse\", total_orders AS \"Total\", pending AS \"Pending\", picking AS \"Picking\", packed AS \"Packed\", shipped AS \"Shipped\", delayed AS \"Delayed\", total_delay_min AS \"Delay (min)\" FROM mv_warehouse_load ORDER BY warehouse_id",
+            "format": "table",
+            "datasource": "RisingWave"
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Delayed" },
+              "properties": [
+                { "id": "custom.displayMode", "value": "color-background" },
+                { "id": "thresholds", "value": { "steps": [
+                  { "value": 0, "color": "green" },
+                  { "value": 1, "color": "yellow" },
+                  { "value": 3, "color": "red" }
+                ]}}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 3,
+        "title": "Fleet ETA Predictions",
+        "type": "table",
+        "gridPos": { "h": 8, "w": 8, "x": 16, "y": 0 },
+        "targets": [
+          {
+            "rawSql": "SELECT shipment_id AS \"Shipment\", truck_id AS \"Truck\", ROUND(eta_minutes::numeric, 1) AS \"ETA (min)\", delay_status AS \"Status\", confidence AS \"Confidence\" FROM mv_eta_predictions WHERE remaining_stops > 0 ORDER BY eta_minutes DESC LIMIT 15",
+            "format": "table",
+            "datasource": "RisingWave"
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Status" },
+              "properties": [
+                { "id": "custom.displayMode", "value": "color-text" },
+                { "id": "mappings", "value": [
+                  { "type": "value", "options": { "on_time": { "color": "green", "text": "On Time" } } },
+                  { "type": "value", "options": { "slight_delay": { "color": "yellow", "text": "Slight Delay" } } },
+                  { "type": "value", "options": { "delayed": { "color": "red", "text": "Delayed" } } }
+                ]}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 4,
+        "title": "Delay Alerts",
+        "type": "table",
+        "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+        "targets": [
+          {
+            "rawSql": "SELECT alert_source AS \"Source\", source_id AS \"Origin\", affected_id AS \"Affected Order\", delay_minutes AS \"Delay (min)\", reason AS \"Reason\", created_at AS \"Time\" FROM mv_delay_alerts ORDER BY created_at DESC LIMIT 20",
+            "format": "table",
+            "datasource": "RisingWave"
+          }
+        ]
+      },
+      {
+        "id": 5,
+        "title": "AI Agent Actions",
+        "type": "table",
+        "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+        "targets": [
+          {
+            "rawSql": "SELECT agent_name AS \"Agent\", action_type AS \"Action\", target_id AS \"Target\", reasoning AS \"Reasoning\", detail AS \"Detail\", created_at AS \"Time\" FROM agent_actions ORDER BY created_at DESC LIMIT 20",
+            "format": "table",
+            "datasource": "RisingWave"
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Action" },
+              "properties": [
+                { "id": "custom.displayMode", "value": "color-text" },
+                { "id": "mappings", "value": [
+                  { "type": "value", "options": { "reroute": { "color": "green", "text": "REROUTE" } } },
+                  { "type": "value", "options": { "notify": { "color": "blue", "text": "NOTIFY" } } },
+                  { "type": "value", "options": { "escalate": { "color": "red", "text": "ESCALATE" } } }
+                ]}
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "id": 6,
+        "title": "Cascade Impact — Disrupted Orders",
+        "type": "table",
+        "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+        "targets": [
+          {
+            "rawSql": "SELECT warehouse_id AS \"Warehouse\", warehouse_delay_min AS \"Delay (min)\", order_id AS \"Order\", customer_name AS \"Customer\", priority AS \"Priority\", shipment_id AS \"Shipment\", truck_id AS \"Truck\", destination AS \"Destination\" FROM mv_cascade_impact ORDER BY priority, warehouse_delay_min DESC",
+            "format": "table",
+            "datasource": "RisingWave"
+          }
+        ],
+        "fieldConfig": {
+          "overrides": [
+            {
+              "matcher": { "id": "byName", "options": "Priority" },
+              "properties": [
+                { "id": "custom.displayMode", "value": "color-background" },
+                { "id": "mappings", "value": [
+                  { "type": "value", "options": { "vip": { "color": "red", "text": "VIP" } } },
+                  { "type": "value", "options": { "express": { "color": "orange", "text": "EXPRESS" } } },
+                  { "type": "value", "options": { "standard": { "color": "blue", "text": "STANDARD" } } }
+                ]}
+              ]
+            }
+          ]
+        }
+      }
+    ]
+  }
+}
