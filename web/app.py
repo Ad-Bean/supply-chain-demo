@@ -86,34 +86,41 @@ if "agent_stop" not in st.session_state:
     st.session_state.agent_stop = threading.Event()
 
 
+def _start_threads(toggle_key, stop_key, thread_configs):
+    """Generic helper: create fresh stop event and spawn threads."""
+    st.session_state[stop_key] = threading.Event()
+    stop = st.session_state[stop_key]
+    for target, kwargs in thread_configs:
+        kwargs["stop_event"] = stop
+        threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
+
+
 def _on_gen_toggle():
     if st.session_state.gen_toggle:
-        st.session_state.gen_stop = threading.Event()
-        stop = st.session_state.gen_stop
         from generators.order_gen import run as run_orders
         from generators.warehouse_gen import run as run_warehouse
         from generators.shipment_gen import run as run_shipments
         from generators.gps_gen import run as run_gps
-        for target, kwargs in [
-            (run_orders, {"interval": 2.0, "stop_event": stop}),
-            (run_warehouse, {"interval": 3.0, "stop_event": stop}),
-            (run_shipments, {"interval": 2.0, "stop_event": stop}),
-            (run_gps, {"interval": 4.0, "stop_event": stop}),
-        ]:
-            threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
+        _start_threads("gen_toggle", "gen_stop", [
+            (run_orders, {"interval": 2.0}),
+            (run_warehouse, {"interval": 3.0}),
+            (run_shipments, {"interval": 2.0}),
+            (run_gps, {"interval": 4.0}),
+        ])
     else:
         st.session_state.gen_stop.set()
 
 
 def _on_agent_toggle():
     if st.session_state.agent_toggle:
-        st.session_state.agent_stop = threading.Event()
-        from agents.disruption_agent import run as run_agent
-        threading.Thread(
-            target=run_agent,
-            kwargs={"poll_interval": 5.0, "stop_event": st.session_state.agent_stop},
-            daemon=True,
-        ).start()
+        from agents.disruption_agent import run as run_disruption
+        from agents.eta_agent import run as run_eta
+        from agents.notification_agent import run as run_notify
+        _start_threads("agent_toggle", "agent_stop", [
+            (run_disruption, {"poll_interval": 5.0}),
+            (run_eta, {"poll_interval": 15.0}),
+            (run_notify, {"poll_interval": 10.0}),
+        ])
     else:
         st.session_state.agent_stop.set()
 
@@ -150,8 +157,8 @@ with st.sidebar:
 
     st.toggle("Data Generators", key="gen_toggle", on_change=_on_gen_toggle,
               help="Stream orders, warehouse events, shipments, and GPS pings")
-    st.toggle("AI Disruption Agent", key="agent_toggle", on_change=_on_agent_toggle,
-              help="Watch for delay alerts and autonomously reroute, notify, escalate")
+    st.toggle("AI Agents", key="agent_toggle", on_change=_on_agent_toggle,
+              help="3 agents: Disruption Response, ETA Prediction, Customer Notification")
 
     st.divider()
 

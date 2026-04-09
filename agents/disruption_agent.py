@@ -136,7 +136,10 @@ def run_agent_loop(alert: dict) -> str:
                 "content": result,
             })
 
-    summary = getattr(response, 'content', None) if 'response' in dir() else None
+    try:
+        summary = response.content if response.content else None
+    except NameError:
+        summary = None
     if not summary:
         summary = f"Completed {len(actions_taken)} actions:\n" + "\n".join(f"  - {a}" for a in actions_taken)
     console.print(Panel(summary, title="Agent — RESOLUTION", border_style="green"))
