@@ -119,6 +119,10 @@ if "generators_running" not in st.session_state:
     st.session_state.generators_running = False
 if "agent_running" not in st.session_state:
     st.session_state.agent_running = False
+if "gen_stop" not in st.session_state:
+    st.session_state.gen_stop = threading.Event()
+if "agent_stop" not in st.session_state:
+    st.session_state.agent_stop = threading.Event()
 
 
 def start_generators():
@@ -127,20 +131,38 @@ def start_generators():
     from generators.shipment_gen import run as run_shipments
     from generators.gps_gen import run as run_gps
 
+    st.session_state.gen_stop.clear()
+    stop = st.session_state.gen_stop
     for target, kwargs in [
-        (run_orders, {"interval": 2.0}),
-        (run_warehouse, {"interval": 3.0}),
-        (run_shipments, {"interval": 2.0}),
-        (run_gps, {"interval": 4.0}),
+        (run_orders, {"interval": 2.0, "stop_event": stop}),
+        (run_warehouse, {"interval": 3.0, "stop_event": stop}),
+        (run_shipments, {"interval": 2.0, "stop_event": stop}),
+        (run_gps, {"interval": 4.0, "stop_event": stop}),
     ]:
         threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
     st.session_state.generators_running = True
 
 
+def stop_generators():
+    st.session_state.gen_stop.set()
+    st.session_state.generators_running = False
+
+
 def start_agent():
     from agents.disruption_agent import run as run_agent
-    threading.Thread(target=run_agent, kwargs={"poll_interval": 5.0}, daemon=True).start()
+
+    st.session_state.agent_stop.clear()
+    threading.Thread(
+        target=run_agent,
+        kwargs={"poll_interval": 5.0, "stop_event": st.session_state.agent_stop},
+        daemon=True,
+    ).start()
     st.session_state.agent_running = True
+
+
+def stop_agent():
+    st.session_state.agent_stop.set()
+    st.session_state.agent_running = False
 
 
 # ── Sidebar ──────────────────────────────────────────────────────────────────
@@ -172,11 +194,17 @@ with st.sidebar:
             start_generators()
             st.rerun()
     else:
-        st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_GREEN};'
-                    f'border-radius:6px;padding:8px 12px;text-align:center;">'
-                    f'<span style="color:{BRAND_GREEN};">&#9679;</span> '
-                    f'<span style="color:#fff;font-size:0.85rem;">Generators Active</span></div>',
-                    unsafe_allow_html=True)
+        gc1, gc2 = st.columns([3, 1])
+        with gc1:
+            st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_GREEN};'
+                        f'border-radius:6px;padding:8px 12px;text-align:center;">'
+                        f'<span style="color:{BRAND_GREEN};">&#9679;</span> '
+                        f'<span style="color:#fff;font-size:0.85rem;">Active</span></div>',
+                        unsafe_allow_html=True)
+        with gc2:
+            if st.button("Stop", key="stop_gen", use_container_width=True):
+                stop_generators()
+                st.rerun()
 
     st.write("")
 
@@ -185,17 +213,23 @@ with st.sidebar:
             start_agent()
             st.rerun()
     else:
-        st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_BLUE};'
-                    f'border-radius:6px;padding:8px 12px;text-align:center;">'
-                    f'<span style="color:{BRAND_BLUE_LIGHT};">&#9679;</span> '
-                    f'<span style="color:#fff;font-size:0.85rem;">Agent Watching</span></div>',
-                    unsafe_allow_html=True)
+        ac1, ac2 = st.columns([3, 1])
+        with ac1:
+            st.markdown(f'<div style="background:{BG_ELEVATED};border:1px solid {BRAND_BLUE};'
+                        f'border-radius:6px;padding:8px 12px;text-align:center;">'
+                        f'<span style="color:{BRAND_BLUE_LIGHT};">&#9679;</span> '
+                        f'<span style="color:#fff;font-size:0.85rem;">Watching</span></div>',
+                        unsafe_allow_html=True)
+        with ac2:
+            if st.button("Stop", key="stop_agent", use_container_width=True):
+                stop_agent()
+                st.rerun()
 
     st.divider()
 
     # Disruption trigger
     st.markdown(f'<p style="color:{ERROR};font-size:0.7rem;text-transform:uppercase;'
-                f'letter-spacing:0.1em;margin-bottom:8px;">Chaos Engineering</p>',
+                f'letter-spacing:0.1em;margin-bottom:8px;">Simulate Disruption</p>',
                 unsafe_allow_html=True)
 
     wh = st.selectbox("Warehouse", ["WH-01", "WH-02", "WH-03"], index=2)

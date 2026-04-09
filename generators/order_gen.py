@@ -36,10 +36,12 @@ def insert_order(order: dict):
     )
 
 
-def run(count: int | None = None, interval: float = 2.0):
+def run(count: int | None = None, interval: float = 2.0, stop_event=None):
     """Generate orders continuously or up to `count`."""
     i = 0
     while count is None or i < count:
+        if stop_event and stop_event.is_set():
+            break
         order = generate_order()
         insert_order(order)
         print(f"[order] {order['order_id']}  {order['customer_name']} → "

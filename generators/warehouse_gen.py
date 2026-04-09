@@ -55,9 +55,9 @@ def insert_event(order_id: str, warehouse_id: str, event_type: str,
     )
 
 
-def run(interval: float = 3.0):
+def run(interval: float = 3.0, stop_event=None):
     """Continuously advance orders through the warehouse pipeline."""
-    while True:
+    while not (stop_event and stop_event.is_set()):
         pending = get_pending_orders()
         if not pending:
             time.sleep(interval / GENERATOR_SPEED)
@@ -75,7 +75,7 @@ def run(interval: float = 3.0):
             insert_event(order["order_id"], order["warehouse_id"],
                          "delay", delay_min,
                          f"Equipment malfunction — {delay_min}min delay")
-            print(f"[warehouse] ⚠ DELAY {order['order_id']} @ {order['warehouse_id']} "
+            print(f"[warehouse] DELAY {order['order_id']} @ {order['warehouse_id']} "
                   f"+{delay_min}min")
         else:
             insert_event(order["order_id"], order["warehouse_id"], nxt)

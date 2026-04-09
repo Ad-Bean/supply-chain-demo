@@ -143,12 +143,12 @@ def run_agent_loop(alert: dict) -> str:
     return summary
 
 
-def run(poll_interval: float = 5.0):
+def run(poll_interval: float = 5.0, stop_event=None):
     """Main polling loop — watches for new delay alerts."""
     seen: set[str] = set()
     console.print("[bold]Disruption Agent started. Watching for delay alerts...[/]\n")
 
-    while True:
+    while not (stop_event and stop_event.is_set()):
         try:
             alerts = get_new_alerts(seen)
             for alert in alerts:

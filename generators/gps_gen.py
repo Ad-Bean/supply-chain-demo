@@ -75,8 +75,8 @@ def emit_ping(truck: dict):
           f"{speed:.0f}mph  stops_left={remaining}")
 
 
-def run(interval: float = 5.0):
-    while True:
+def run(interval: float = 5.0, stop_event=None):
+    while not (stop_event and stop_event.is_set()):
         trucks = get_active_trucks()
         for truck in trucks:
             if int(truck["remaining_stops"]) > 0:

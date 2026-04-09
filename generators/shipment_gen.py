@@ -46,8 +46,8 @@ def create_shipment(order_id: str, warehouse_id: str):
           f"({total_stops} stops)")
 
 
-def run(interval: float = 2.0):
-    while True:
+def run(interval: float = 2.0, stop_event=None):
+    while not (stop_event and stop_event.is_set()):
         ready = get_shipped_without_shipment()
         for order in ready:
             create_shipment(order["order_id"], order["warehouse_id"])
