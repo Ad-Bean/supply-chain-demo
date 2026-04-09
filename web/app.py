@@ -341,7 +341,7 @@ def _kpi():
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Total Orders", total)
     c2.metric("Shipped", shipped)
-    c3.metric("Delayed", delayed, delta=f"-{delayed}" if delayed else None, delta_color="inverse")
+    c3.metric("Delayed", delayed)
     c4.metric("Agent Actions", agent_acts)
 
 
