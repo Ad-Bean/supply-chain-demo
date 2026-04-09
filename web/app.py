@@ -263,41 +263,36 @@ if st.session_state.get("show_sql"):
     )
 
 _refresh = st.session_state.get("_refresh_sec", 5)
-st.caption(f"Tables refresh every {_refresh}s. Charts refresh every {_refresh * 3}s.")
+st.caption(f"Live dashboard refreshing every {_refresh}s.")
 
-# ── Charts fragment (slow refresh — less flicker) ────────────────────────────
-# Charts are heavy DOM elements that flicker when rebuilt. We refresh them at
-# 3x the data interval to keep them reasonably current while minimizing flicker.
+# ── Single live fragment with fade-in animation ──────────────────────────────
+
+_refresh = st.session_state.get("_refresh_sec", 5)
 
 
-@st.fragment(run_every=_refresh * 3)
-def _charts():
+@st.fragment(run_every=_refresh)
+def _live_dashboard():
     data = _fetch_all()
+
+    render_kpi(data)
+    st.write("")
+
     col_l, col_r = st.columns(2)
     with col_l:
         render_order_funnel(data)
     with col_r:
         render_warehouse_load(data)
+
     render_fleet_map(data)
 
-
-_charts()
-
-# ── Live data fragment (tables + metrics — fast refresh, no flicker) ─────────
-
-
-@st.fragment(run_every=_refresh)
-def _live_data():
-    data = _fetch_all()
-    render_kpi(data)
-    st.write("")
     col_l2, col_r2 = st.columns(2)
     with col_l2:
         render_eta(data)
     with col_r2:
         render_alerts(data)
+
     render_agent_actions(data)
     render_cascade(data)
 
 
-_live_data()
+_live_dashboard()
