@@ -1,82 +1,33 @@
-"""Supply Chain Control Tower — Live Streaming Dashboard (Streamlit)
-Branded with RisingWave design system."""
+"""Supply Chain Control Tower — Live Streaming Dashboard (Streamlit)"""
 
 import threading
 import sys
 from pathlib import Path
 
 import streamlit as st
-import pandas as pd
-import plotly.express as px
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from db import query, query_batch
+from db import query_batch
+from web.theme import (
+    RW_ICON, RW_LOGO, RW_URL, RW_DOCS, RW_GITHUB, RW_CLOUD,
+    BRAND_BLUE_LIGHT, BRAND_GREEN, TEXT_MUTED, TEXT_DIM, ERROR,
+    inject_css,
+)
+from web.panels import (
+    render_kpi, render_order_funnel, render_warehouse_load,
+    render_fleet_map, render_eta, render_alerts,
+    render_agent_actions, render_cascade,
+)
 
-# ── RisingWave brand tokens ─────────────────────────────────────────────────
-
-BRAND_BLUE = "#005EEC"
-BRAND_BLUE_LIGHT = "#337EF0"
-BRAND_GREEN = "#62F4C0"
-BG_DARK = "#081F29"
-BG_ELEVATED = "#0A3246"
-BG_CARD = "#0C2535"
-TEXT_MUTED = "#A0A0AB"
-TEXT_DIM = "#70707B"
-BORDER_DARK = "rgba(255,255,255,0.1)"
-SUCCESS = "#10B981"
-WARNING = "#F59E0B"
-ERROR = "#EF4444"
-
-RW_LOGO = "https://www.risingwave.com/_next/static/media/risingwave-logo-white-text.86234334.svg"
-RW_ICON = "https://www.risingwave.com/metadata/icon.svg"
-RW_URL = "https://www.risingwave.com"
-RW_DOCS = "https://docs.risingwave.com"
-RW_GITHUB = "https://github.com/risingwavelabs/risingwave"
-RW_CLOUD = "https://cloud.risingwave.com"
-
-STAGE_COLORS = {
-    "received": BRAND_BLUE, "picking": WARNING, "packed": "#8B5CF6",
-    "shipped": BRAND_GREEN, "delay": ERROR,
-    "Pending": BRAND_BLUE, "Picking": WARNING, "Packed": "#8B5CF6",
-    "Shipped": BRAND_GREEN, "Delayed": ERROR,
-}
+# ── Page config ──────────────────────────────────────────────────────────────
 
 st.set_page_config(
     page_title="RisingWave | Supply Chain Control Tower",
     page_icon=RW_ICON,
     layout="wide",
 )
-
-# ── Custom CSS ───────────────────────────────────────────────────────────────
-
-st.markdown(f"""
-<style>
-    header[data-testid="stHeader"] {{ background-color: {BG_DARK}; }}
-    div[data-testid="stMetric"] {{
-        background: {BG_CARD}; border: 1px solid {BORDER_DARK};
-        border-radius: 8px; padding: 12px 16px;
-    }}
-    div[data-testid="stMetric"] label {{
-        color: {TEXT_MUTED}; font-size: 0.75rem;
-        text-transform: uppercase; letter-spacing: 0.05em;
-    }}
-    div[data-testid="stMetric"] div[data-testid="stMetricValue"] {{
-        color: #FFFFFF; font-size: 1.8rem;
-    }}
-    h3 {{ color: {BRAND_GREEN} !important; font-size: 1rem !important;
-         text-transform: uppercase; letter-spacing: 0.08em; }}
-    div[data-testid="stDataFrame"] {{
-        border: 1px solid {BORDER_DARK}; border-radius: 8px;
-    }}
-    section[data-testid="stSidebar"] {{
-        background-color: {BG_CARD}; border-right: 1px solid {BORDER_DARK};
-    }}
-    .stPlotlyChart {{
-        border: 1px solid {BORDER_DARK}; border-radius: 8px; overflow: hidden;
-    }}
-</style>
-""", unsafe_allow_html=True)
+inject_css()
 
 # ── Background services ──────────────────────────────────────────────────────
 
@@ -86,8 +37,7 @@ if "agent_stop" not in st.session_state:
     st.session_state.agent_stop = threading.Event()
 
 
-def _start_threads(toggle_key, stop_key, thread_configs):
-    """Generic helper: create fresh stop event and spawn threads."""
+def _start_threads(stop_key, thread_configs):
     st.session_state[stop_key] = threading.Event()
     stop = st.session_state[stop_key]
     for target, kwargs in thread_configs:
@@ -101,7 +51,7 @@ def _on_gen_toggle():
         from generators.warehouse_gen import run as run_warehouse
         from generators.shipment_gen import run as run_shipments
         from generators.gps_gen import run as run_gps
-        _start_threads("gen_toggle", "gen_stop", [
+        _start_threads("gen_stop", [
             (run_orders, {"interval": 2.0}),
             (run_warehouse, {"interval": 3.0}),
             (run_shipments, {"interval": 2.0}),
@@ -116,7 +66,7 @@ def _on_agent_toggle():
         from agents.disruption_agent import run as run_disruption
         from agents.eta_agent import run as run_eta
         from agents.notification_agent import run as run_notify
-        _start_threads("agent_toggle", "agent_stop", [
+        _start_threads("agent_stop", [
             (run_disruption, {"poll_interval": 5.0}),
             (run_eta, {"poll_interval": 15.0}),
             (run_notify, {"poll_interval": 10.0}),
@@ -160,16 +110,12 @@ with st.sidebar:
               help="Stream orders, warehouse events, shipments, and GPS pings")
     st.toggle("AI Agents", key="agent_toggle", on_change=_on_agent_toggle,
               help="3 agents: Disruption Response, ETA Prediction, Customer Notification")
-    show_sql = st.toggle("Show SQL", key="show_sql",
-                         help="Reveal the RisingWave materialized view definitions behind each panel")
+    st.toggle("Show SQL", key="show_sql",
+              help="Reveal the RisingWave materialized view definitions behind each panel")
 
     REFRESH_OPTIONS = {"1s": 1, "2s": 2, "3s": 3, "5s": 5, "10s": 10, "30s": 30}
-    refresh_label = st.selectbox(
-        "Refresh interval",
-        list(REFRESH_OPTIONS.keys()),
-        index=2,  # default 3s
-        help="How often the dashboard fetches fresh data from RisingWave",
-    )
+    refresh_label = st.selectbox("Refresh interval", list(REFRESH_OPTIONS.keys()), index=2,
+                                 help="How often the dashboard fetches fresh data from RisingWave")
     st.session_state._refresh_sec = REFRESH_OPTIONS[refresh_label]
 
     st.divider()
@@ -183,12 +129,12 @@ with st.sidebar:
     scenario_options = {f"{s['icon']} {s['name']}": s["id"] for s in SCENARIOS}
     scenario_options["🎲 Random Scenario"] = "random"
 
-    selected = st.selectbox("Scenario", list(scenario_options.keys()), index=len(scenario_options) - 1)
+    selected = st.selectbox("Scenario", list(scenario_options.keys()),
+                            index=len(scenario_options) - 1)
     scenario_id = scenario_options[selected]
     wh_override = None
 
     if scenario_id == "random":
-        # Show preview of what random might pick
         st.caption("A random disruption will strike a random warehouse.")
     else:
         s = next(s for s in SCENARIOS if s["id"] == scenario_id)
@@ -197,29 +143,20 @@ with st.sidebar:
 
     if st.button("Trigger Disruption", use_container_width=True):
         from scripts.trigger_disruption import trigger
-
         if scenario_id == "random":
             resolved = pick_random_scenario()
         else:
             resolved = resolve_scenario(scenario_id, wh_override)
-
         affected = trigger(resolved["warehouse"], resolved["delay"], resolved["detail"])
-
         if affected > 0:
-            st.toast(
-                f"{resolved['icon']} {resolved['name']} at {resolved['warehouse']} "
-                f"— {resolved['delay']}min delay, {affected} orders affected!",
-                icon="🚨",
-            )
+            st.toast(f"{resolved['icon']} {resolved['name']} at {resolved['warehouse']} "
+                     f"— {resolved['delay']}min delay, {affected} orders affected!", icon="🚨")
         else:
             st.toast("No pending orders to disrupt. Let generators run a bit.", icon="⚠️")
 
-    # Resolve active disruptions
     def _do_resolve():
         from db import execute, query as db_query
         import uuid
-        # Find all orders stuck in 'delay' and move them back to 'received'
-        # so the warehouse pipeline can re-process them
         delayed = db_query("""
             SELECT DISTINCT o.order_id, o.warehouse_id
             FROM orders o
@@ -246,10 +183,8 @@ with st.sidebar:
             st.toast("No active disruptions to resolve.", icon="ℹ️")
 
     st.divider()
-
     st.button("Reset All Data", use_container_width=True, on_click=_do_reset)
 
-    # Links
     st.markdown(f"""
     <div style="padding-top:12px; text-align:center;">
         <a href="{RW_DOCS}" target="_blank" style="color:{TEXT_MUTED};font-size:0.75rem;text-decoration:none;margin:0 8px;">Docs</a>
@@ -265,152 +200,15 @@ with st.sidebar:
     """, unsafe_allow_html=True)
 
 
-# ── Plotly theme ─────────────────────────────────────────────────────────────
-
-def apply_rw_layout(fig, height=350):
-    fig.update_layout(
-        height=height,
-        margin=dict(t=10, b=30, l=40, r=10),
-        paper_bgcolor="rgba(0,0,0,0)",
-        plot_bgcolor=BG_CARD,
-        font=dict(color=TEXT_MUTED, size=12),
-        xaxis=dict(gridcolor=BORDER_DARK, zerolinecolor=BORDER_DARK),
-        yaxis=dict(gridcolor=BORDER_DARK, zerolinecolor=BORDER_DARK),
-        legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=TEXT_MUTED)),
-    )
-    return fig
-
-
-# ── Materialized view SQL definitions (shown when "Show SQL" is on) ───────────
-
-MV_SQL = {
-    "order_status": {
-        "name": "mv_order_status",
-        "explain": "Joins `orders` with `warehouse_events` to find each order's latest status. "
-                   "RisingWave keeps this **incrementally updated**, every new event instantly "
-                   "refreshes the view without re-scanning the full table.",
-        "sql": """\
-CREATE MATERIALIZED VIEW mv_order_status AS
-SELECT DISTINCT ON (o.order_id)
-    o.order_id, o.customer_name, o.priority, o.warehouse_id,
-    we.event_type AS current_status, we.delay_minutes
-FROM orders o
-LEFT JOIN warehouse_events we ON o.order_id = we.order_id
-ORDER BY o.order_id, we.created_at DESC;""",
-    },
-    "warehouse_load": {
-        "name": "mv_warehouse_load",
-        "explain": "Aggregates order counts per warehouse per stage using `FILTER (WHERE ...)`. "
-                   "This is a **streaming GROUP BY**, RisingWave maintains the counts incrementally "
-                   "as events arrive, not by re-aggregating all rows.",
-        "sql": """\
-CREATE MATERIALIZED VIEW mv_warehouse_load AS
-SELECT
-    o.warehouse_id,
-    COUNT(*) AS total_orders,
-    COUNT(*) FILTER (WHERE we.event_type = 'received') AS pending,
-    COUNT(*) FILTER (WHERE we.event_type = 'picking')  AS picking,
-    COUNT(*) FILTER (WHERE we.event_type = 'packed')   AS packed,
-    COUNT(*) FILTER (WHERE we.event_type = 'shipped')  AS shipped,
-    COUNT(*) FILTER (WHERE we.event_type = 'delay')    AS delayed
-FROM orders o
-LEFT JOIN (...latest event per order...) we ON o.order_id = we.order_id
-GROUP BY o.warehouse_id;""",
-    },
-    "eta": {
-        "name": "mv_eta_predictions",
-        "explain": "Computes ETAs from live GPS speed and remaining stops. Uses a **compounding "
-                   "delay factor**, if speed drops below 25 mph, each remaining stop adds 15% more "
-                   "delay. Confidence scores are derived from speed thresholds. All computed in "
-                   "streaming SQL, no application code needed.",
-        "sql": """\
-CREATE MATERIALIZED VIEW mv_eta_predictions AS
-SELECT
-    s.shipment_id, s.truck_id, s.destination,
-    gps.remaining_stops, gps.speed_mph,
-    CASE WHEN gps.speed_mph > 0 THEN
-        gps.remaining_stops * (10.0 / gps.speed_mph) * 60
-        * CASE WHEN gps.speed_mph < 25
-               THEN POWER(1.15, gps.remaining_stops)
-               ELSE 1.0 END
-    ELSE NULL END AS eta_minutes,
-    CASE WHEN gps.speed_mph >= 40 THEN 'on_time'
-         WHEN gps.speed_mph >= 25 THEN 'slight_delay'
-         ELSE 'delayed' END AS delay_status
-FROM shipments s
-LEFT JOIN (...latest GPS per truck...) gps ON s.truck_id = gps.truck_id;""",
-    },
-    "alerts": {
-        "name": "mv_delay_alerts",
-        "explain": "Combines two alert sources with `UNION ALL`: warehouse delays >10 min "
-                   "and shipments flagged as delayed by the ETA view. This MV **chains off another "
-                   "MV** (`mv_eta_predictions`), RisingWave propagates changes through the DAG automatically.",
-        "sql": """\
-CREATE MATERIALIZED VIEW mv_delay_alerts AS
-SELECT 'warehouse' AS alert_source, we.warehouse_id AS source_id,
-       we.order_id AS affected_id, we.delay_minutes, we.detail AS reason
-FROM warehouse_events we
-WHERE we.event_type = 'delay' AND we.delay_minutes > 10
-UNION ALL
-SELECT 'shipment', eta.truck_id, eta.order_id,
-       eta.eta_minutes::INT, eta.delay_status
-FROM mv_eta_predictions eta
-WHERE eta.delay_status = 'delayed';""",
-    },
-    "actions": {
-        "name": "agent_actions (table)",
-        "explain": "This is a regular table, not a materialized view. AI agents write their "
-                   "decisions here (reroutes, notifications, escalations). The dashboard reads "
-                   "it like any other table, RisingWave serves it via the PostgreSQL protocol.",
-        "sql": """\
-CREATE TABLE agent_actions (
-    action_id   VARCHAR PRIMARY KEY,
-    agent_name  VARCHAR NOT NULL,
-    action_type VARCHAR NOT NULL,  -- reroute | notify | escalate
-    target_id   VARCHAR NOT NULL,
-    reasoning   VARCHAR NOT NULL,
-    detail      VARCHAR,
-    created_at  TIMESTAMPTZ NOT NULL DEFAULT now()
-);""",
-    },
-    "cascade": {
-        "name": "mv_cascade_impact",
-        "explain": "A **multi-way streaming JOIN** across `warehouse_events`, `orders`, and "
-                   "`shipments`. When a delay hits one warehouse, this view instantly shows "
-                   "every affected customer, shipment, and truck, the full blast radius. "
-                   "No batch job, no ETL pipeline.",
-        "sql": """\
-CREATE MATERIALIZED VIEW mv_cascade_impact AS
-SELECT
-    we.warehouse_id, we.delay_minutes AS warehouse_delay_min,
-    o.order_id, o.customer_name, o.priority,
-    s.shipment_id, s.truck_id, s.destination
-FROM warehouse_events we
-JOIN orders o ON we.order_id = o.order_id
-LEFT JOIN shipments s ON o.order_id = s.order_id
-WHERE we.event_type = 'delay' AND we.delay_minutes > 10;""",
-    },
-}
-
-
-def _show_sql(section_key: str):
-    """Render the SQL expander for a section if Show SQL is enabled."""
-    if not st.session_state.get("show_sql"):
-        return
-    mv = MV_SQL.get(section_key)
-    if not mv:
-        return
-    with st.expander(f"**{mv['name']}**, How this works in RisingWave", expanded=False):
-        st.markdown(mv["explain"])
-        st.code(mv["sql"], language="sql")
-
-
-# ── Cached data layer ────────────────────────────────────────────────────────
+# ── Data layer ───────────────────────────────────────────────────────────────
 
 QUERIES = {
     "order_status":   "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status GROUP BY current_status",
     "agent_counts":   "SELECT action_type, COUNT(*) AS cnt FROM agent_actions GROUP BY action_type",
     "warehouse_load": "SELECT * FROM mv_warehouse_load ORDER BY warehouse_id",
+    "tracking":       "SELECT DISTINCT ON (truck_id) truck_id, lat, lon, speed_mph, "
+                      "remaining_stops, destination FROM mv_shipment_tracking "
+                      "WHERE remaining_stops > 0 AND lat IS NOT NULL ORDER BY truck_id",
     "eta":            "SELECT shipment_id, truck_id, remaining_stops, speed_mph, "
                       "eta_minutes, delay_status, confidence "
                       "FROM mv_eta_predictions WHERE remaining_stops > 0 "
@@ -427,16 +225,13 @@ QUERIES = {
 
 @st.cache_data(ttl=1, show_spinner=False)
 def _fetch_all():
-    """Fetch all dashboard data in one connection (1 TCP round-trip)."""
     try:
         return query_batch(QUERIES)
     except Exception:
         return {key: [] for key in QUERIES}
 
 
-# ── Static layout + independent streaming fragments ──────────────────────────
-# Layout (headers, columns) renders ONCE. Each @st.fragment only re-renders
-# its own content. Shared cache means 1 DB call per 3s total.
+# ── Header ───────────────────────────────────────────────────────────────────
 
 st.markdown(f"""
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
@@ -456,8 +251,6 @@ st.markdown(f"""
 
 st.write("")
 
-# ── KPI Metrics ──────────────────────────────────────────────────────────────
-
 if st.session_state.get("show_sql"):
     st.info(
         "**What are Materialized Views?** "
@@ -471,8 +264,8 @@ if st.session_state.get("show_sql"):
 
 _interval = st.session_state.get("_refresh_sec", 3)
 st.caption(f"Live counters from RisingWave materialized views, refreshing every {_interval}s.")
-# ── All dashboard panels in one fragment (refresh controlled by sidebar) ──────
 
+# ── Live dashboard fragment ──────────────────────────────────────────────────
 
 _refresh = st.session_state.get("_refresh_sec", 3)
 
@@ -481,159 +274,31 @@ _refresh = st.session_state.get("_refresh_sec", 3)
 def _live_dashboard():
     data = _fetch_all()
 
-    # -- KPI Metrics --
-    odf = pd.DataFrame(data["order_status"]) if data["order_status"] else pd.DataFrame(columns=["current_status", "cnt"])
-    adf = pd.DataFrame(data["agent_counts"]) if data["agent_counts"] else pd.DataFrame(columns=["action_type", "cnt"])
-
-    total = int(odf["cnt"].sum()) if not odf.empty else 0
-    shipped = int(odf.loc[odf["current_status"] == "shipped", "cnt"].sum()) if not odf.empty else 0
-    delayed = int(odf.loc[odf["current_status"] == "delay", "cnt"].sum()) if not odf.empty else 0
-    agent_acts = int(adf["cnt"].sum()) if not adf.empty else 0
-
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Total Orders", total)
-    c2.metric("Shipped", shipped)
-    c3.metric("Delayed", delayed)
-    c4.metric("Agent Actions", agent_acts)
-
+    render_kpi(data)
     st.write("")
 
-    # -- Order Funnel + Warehouse Load --
-    col_left, col_right = st.columns(2)
+    # Row 2: Order Funnel + Warehouse Load
+    col_l, col_r = st.columns(2)
+    with col_l:
+        render_order_funnel(data)
+    with col_r:
+        render_warehouse_load(data)
 
-    with col_left:
-        st.subheader("Order Fulfillment")
-        st.caption("Each order flows: received → picking → packed → shipped. "
-                   "Backed by `mv_order_status` materialized view.")
-        _show_sql("order_status")
-        if data["order_status"]:
-            df = pd.DataFrame(data["order_status"])
-            cats = ["received", "picking", "packed", "shipped", "delay"]
-            df["current_status"] = pd.Categorical(df["current_status"], categories=cats, ordered=True)
-            df = df.sort_values("current_status").dropna(subset=["current_status"])
-            fig = px.bar(df, x="current_status", y="cnt", color="current_status",
-                         color_discrete_map=STAGE_COLORS,
-                         labels={"current_status": "Status", "cnt": "Count"})
-            fig.update_layout(showlegend=False)
-            apply_rw_layout(fig, height=340)
-            st.plotly_chart(fig, key="funnel")
-        else:
-            st.info("No orders yet. Start generators from the sidebar.")
+    # Row 3: Fleet Map (full width)
+    render_fleet_map(data)
 
-    with col_right:
-        st.subheader("Warehouse Load")
-        st.caption("Orders in each stage per warehouse. Red = delayed. "
-                   "Backed by `mv_warehouse_load`.")
-        _show_sql("warehouse_load")
-        if data["warehouse_load"]:
-            wh = pd.DataFrame(data["warehouse_load"])
-            display = wh.rename(columns={
-                "warehouse_id": "Warehouse", "total_orders": "Total",
-                "pending": "Pending", "picking": "Picking", "packed": "Packed",
-                "shipped": "Shipped", "delayed": "Delayed", "total_delay_min": "Delay (min)",
-            })
-            st.dataframe(display, width="stretch", hide_index=True)
-            melt_cols = ["Pending", "Picking", "Packed", "Shipped", "Delayed"]
-            available = [c for c in melt_cols if c in display.columns]
-            melted = display.melt(id_vars=["Warehouse"], value_vars=available,
-                                  var_name="Stage", value_name="Count")
-            fig2 = px.bar(melted, x="Warehouse", y="Count", color="Stage",
-                          color_discrete_map=STAGE_COLORS)
-            apply_rw_layout(fig2, height=220)
-            st.plotly_chart(fig2, key="wh_chart")
-        else:
-            st.info("No warehouse data yet.")
+    # Row 4: ETA + Alerts
+    col_l2, col_r2 = st.columns(2)
+    with col_l2:
+        render_eta(data)
+    with col_r2:
+        render_alerts(data)
 
-    # -- Fleet ETA + Alerts --
-    col_left2, col_right2 = st.columns(2)
+    # Row 5: Agent Actions
+    render_agent_actions(data)
 
-    with col_left2:
-        st.subheader("Fleet ETA Predictions")
-        st.caption("ETAs computed from GPS speed + remaining stops with compounding delay factor. "
-                   "Backed by `mv_eta_predictions`.")
-        _show_sql("eta")
-        if data["eta"]:
-            edf = pd.DataFrame(data["eta"])
-            edf["eta_minutes"] = edf["eta_minutes"].apply(lambda x: round(float(x), 1) if x else None)
-            edf["confidence"] = edf["confidence"].apply(lambda x: round(float(x), 2) if x else None)
-            st.dataframe(
-                edf.rename(columns={
-                    "shipment_id": "Shipment", "truck_id": "Truck",
-                    "remaining_stops": "Stops Left", "speed_mph": "Speed",
-                    "eta_minutes": "ETA (min)", "delay_status": "Status",
-                    "confidence": "Confidence",
-                }),
-                width="stretch", hide_index=True,
-            )
-        else:
-            st.info("No active shipments.")
-
-    with col_right2:
-        st.subheader("Delay Alerts")
-        st.caption("Warehouse delays >10min and shipments marked as delayed. "
-                   "Backed by `mv_delay_alerts`, triggers AI agents.")
-        _show_sql("alerts")
-        if data["alerts"]:
-            aldf = pd.DataFrame(data["alerts"])
-            aldf["created_at"] = pd.to_datetime(aldf["created_at"])
-            st.dataframe(
-                aldf.rename(columns={
-                    "alert_source": "Source", "source_id": "Origin",
-                    "affected_id": "Order", "delay_minutes": "Delay (min)",
-                    "reason": "Reason", "created_at": "Time",
-                }),
-                width="stretch", hide_index=True,
-            )
-        else:
-            st.markdown(f'<p style="color:{SUCCESS};">No active alerts.</p>',
-                        unsafe_allow_html=True)
-
-    # -- AI Agent Actions --
-    st.subheader("AI Agent Actions")
-    st.caption("Autonomous actions taken by 3 AI agents: "
-               "Disruption Response (reroute/escalate), ETA Prediction, and Customer Notification. "
-               "Each action is logged to the `agent_actions` table in RisingWave.")
-    _show_sql("actions")
-    if data["actions"]:
-        acdf = pd.DataFrame(data["actions"])
-        acdf["created_at"] = pd.to_datetime(acdf["created_at"])
-        reroutes = len(acdf[acdf["action_type"] == "reroute"])
-        notifies = len(acdf[acdf["action_type"] == "notify"])
-        escalations = len(acdf[acdf["action_type"] == "escalate"])
-        mc1, mc2, mc3 = st.columns(3)
-        mc1.metric("Reroutes", reroutes)
-        mc2.metric("Notifications", notifies)
-        mc3.metric("Escalations", escalations)
-        st.dataframe(
-            acdf.rename(columns={
-                "agent_name": "Agent", "action_type": "Action",
-                "target_id": "Target", "reasoning": "Reasoning",
-                "detail": "Detail", "created_at": "Time",
-            }),
-            width="stretch", hide_index=True,
-        )
-    else:
-        st.info("No agent actions yet. Trigger a disruption to see the AI agent respond.")
-
-    # -- Cascade Impact --
-    st.subheader("Cascade Impact")
-    st.caption("When a warehouse is disrupted, this view joins across orders, shipments, and trucks "
-               "to show the full downstream blast radius. Backed by `mv_cascade_impact`.")
-    _show_sql("cascade")
-    if data["cascade"]:
-        cdf = pd.DataFrame(data["cascade"])
-        st.dataframe(
-            cdf.rename(columns={
-                "warehouse_id": "Warehouse", "warehouse_delay_min": "Delay (min)",
-                "order_id": "Order", "customer_name": "Customer",
-                "priority": "Priority", "shipment_id": "Shipment",
-                "truck_id": "Truck", "destination": "Destination",
-            }),
-            width="stretch", hide_index=True,
-        )
-    else:
-        st.markdown(f'<p style="color:{SUCCESS};">No cascading disruptions.</p>',
-                    unsafe_allow_html=True)
+    # Row 6: Cascade Impact
+    render_cascade(data)
 
 
 _live_dashboard()
