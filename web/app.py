@@ -201,6 +201,37 @@ with st.sidebar:
         else:
             st.toast("No pending orders to disrupt. Let generators run a bit.", icon="⚠️")
 
+    # Resolve active disruptions
+    def _do_resolve():
+        from db import execute, query as db_query
+        import uuid
+        # Find all orders stuck in 'delay' and move them back to 'received'
+        # so the warehouse pipeline can re-process them
+        delayed = db_query("""
+            SELECT DISTINCT o.order_id, o.warehouse_id
+            FROM orders o
+            JOIN warehouse_events we ON o.order_id = we.order_id
+            WHERE we.event_type = 'delay'
+              AND o.order_id NOT IN (
+                  SELECT order_id FROM warehouse_events WHERE event_type = 'shipped'
+              )
+        """)
+        for d in delayed:
+            execute(
+                """INSERT INTO warehouse_events
+                   (event_id, order_id, warehouse_id, event_type, delay_minutes, detail)
+                   VALUES (%s, %s, %s, 'received', 0, 'Disruption resolved — order re-queued')""",
+                (f"WE-{uuid.uuid4().hex[:8].upper()}", d["order_id"], d["warehouse_id"]),
+            )
+        return len(delayed)
+
+    if st.button("Resolve All Disruptions", use_container_width=True):
+        count = _do_resolve()
+        if count > 0:
+            st.toast(f"Resolved {count} disrupted orders — re-queued for processing.", icon="✅")
+        else:
+            st.toast("No active disruptions to resolve.", icon="ℹ️")
+
     st.divider()
 
     st.button("Reset All Data", use_container_width=True, on_click=_do_reset)
