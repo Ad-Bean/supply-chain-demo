@@ -124,6 +124,26 @@ if "gen_threads_alive" not in st.session_state:
 if "agent_thread_alive" not in st.session_state:
     st.session_state.agent_thread_alive = False
 
+# Sync toggle default with actual thread state on first load.
+# gen_threads_alive tracks whether we started threads in this process.
+# If code reloads (file save) but process persists, threads survive —
+# stop_event.is_set() tells us if they were told to stop.
+if "gen_toggle" not in st.session_state:
+    alive = st.session_state.gen_threads_alive and not st.session_state.gen_stop.is_set()
+    st.session_state.gen_toggle = alive
+if "agent_toggle" not in st.session_state:
+    alive = st.session_state.agent_thread_alive and not st.session_state.agent_stop.is_set()
+    st.session_state.agent_toggle = alive
+
+# Safety: if toggle is OFF but threads are alive (e.g. code changed while running),
+# signal them to stop so UI and reality stay in sync.
+if not st.session_state.gen_toggle and st.session_state.gen_threads_alive and not st.session_state.gen_stop.is_set():
+    st.session_state.gen_stop.set()
+    st.session_state.gen_threads_alive = False
+if not st.session_state.agent_toggle and st.session_state.agent_thread_alive and not st.session_state.agent_stop.is_set():
+    st.session_state.agent_stop.set()
+    st.session_state.agent_thread_alive = False
+
 
 def _start_generators():
     from generators.order_gen import run as run_orders
