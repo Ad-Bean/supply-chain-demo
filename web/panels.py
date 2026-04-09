@@ -34,9 +34,11 @@ def render_order_funnel(data: dict):
         cats = ["received", "picking", "packed", "shipped", "delay"]
         df["current_status"] = pd.Categorical(df["current_status"], categories=cats, ordered=True)
         df = df.sort_values("current_status").dropna(subset=["current_status"])
-        chart_df = df.set_index("current_status")[["cnt"]].rename(columns={"cnt": "Orders"})
-        colors = [STAGE_COLORS.get(s, "#888") for s in chart_df.index]
-        st.bar_chart(chart_df, color=colors, height=340)
+        # Pivot each status into its own column so st.bar_chart can color them
+        chart_df = df.set_index("current_status")["cnt"].to_dict()
+        chart_data = pd.DataFrame([chart_df], index=["count"]).fillna(0).astype(int)
+        colors = [STAGE_COLORS.get(c, "#888") for c in chart_data.columns]
+        st.bar_chart(chart_data, color=colors, height=340)
     else:
         st.info("No orders yet. Start generators from the sidebar.")
 
@@ -59,10 +61,14 @@ def render_warehouse_load(data: dict):
 
 
 def render_fleet_map(data: dict):
-    st.subheader("Fleet Map")
-    st.caption("Live truck positions from GPS pings. Color = delay status. "
-               "Backed by `mv_shipment_tracking`.")
-    show_sql("fleet_map")
+    with st.expander("Fleet Map — Live truck positions", expanded=False):
+        st.caption("Live truck positions from GPS pings. Color = delay status. "
+                   "Backed by `mv_shipment_tracking`.")
+        show_sql("fleet_map")
+        _render_fleet_map_inner(data)
+
+
+def _render_fleet_map_inner(data: dict):
     if data.get("tracking"):
         df = pd.DataFrame(data["tracking"])
         df = df.dropna(subset=["lat", "lon"])
