@@ -9,7 +9,7 @@ import sys
 import uuid
 import random
 
-from db import execute, query
+from db import execute_batch, query
 
 from generators.seed_data import WAREHOUSES
 
@@ -44,17 +44,20 @@ def trigger(warehouse_id: str | None = None, delay_minutes: int = 45,
     print(f"  Affected orders: {len(pending)}")
     print(f"{'='*60}\n")
 
+    # Batch all inserts into a single connection
+    stmts = []
     for order in pending:
-        event_id = f"WE-{uuid.uuid4().hex[:8].upper()}"
-        execute(
+        stmts.append((
             """INSERT INTO warehouse_events (event_id, order_id, warehouse_id,
                event_type, delay_minutes, detail)
                VALUES (%s, %s, %s, 'delay', %s, %s)""",
-            (event_id, order["order_id"], warehouse_id, delay_minutes, detail),
-        )
+            (f"WE-{uuid.uuid4().hex[:8].upper()}", order["order_id"],
+             warehouse_id, delay_minutes, detail),
+        ))
         print(f"  {order['order_id']}  {order['customer_name']:20s}  "
               f"priority={order['priority']}")
 
+    execute_batch(stmts)
     print(f"\n  {len(pending)} delay events injected.\n")
     return len(pending)
 

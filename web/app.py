@@ -155,7 +155,7 @@ with st.sidebar:
             st.toast("No pending orders to disrupt. Let generators run a bit.", icon="⚠️")
 
     def _do_resolve():
-        from db import execute, query as db_query
+        from db import execute_batch, query as db_query
         import uuid
         delayed = db_query("""
             SELECT DISTINCT o.order_id, o.warehouse_id
@@ -166,13 +166,15 @@ with st.sidebar:
                   SELECT order_id FROM warehouse_events WHERE event_type = 'shipped'
               )
         """)
-        for d in delayed:
-            execute(
-                """INSERT INTO warehouse_events
-                   (event_id, order_id, warehouse_id, event_type, delay_minutes, detail)
-                   VALUES (%s, %s, %s, 'received', 0, 'Disruption resolved, order re-queued')""",
-                (f"WE-{uuid.uuid4().hex[:8].upper()}", d["order_id"], d["warehouse_id"]),
-            )
+        if delayed:
+            stmts = [
+                ("""INSERT INTO warehouse_events
+                    (event_id, order_id, warehouse_id, event_type, delay_minutes, detail)
+                    VALUES (%s, %s, %s, 'received', 0, 'Disruption resolved, order re-queued')""",
+                 (f"WE-{uuid.uuid4().hex[:8].upper()}", d["order_id"], d["warehouse_id"]))
+                for d in delayed
+            ]
+            execute_batch(stmts)
         return len(delayed)
 
     if st.button("Resolve All Disruptions", use_container_width=True):
