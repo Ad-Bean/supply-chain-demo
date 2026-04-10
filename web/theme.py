@@ -36,19 +36,6 @@ STAGE_COLORS = {
 def inject_css():
     st.markdown(f"""
     <style>
-        /* ── Fade-in animation for all refreshing elements ── */
-        @keyframes fadeIn {{
-            from {{ opacity: 0.4; }}
-            to {{ opacity: 1; }}
-        }}
-
-        /* Apply fade-in to fragment content on refresh */
-        div[data-testid="stMetric"],
-        div[data-testid="stDataFrame"],
-        .stPlotlyChart {{
-            animation: fadeIn 0.5s ease-in-out;
-        }}
-
         /* ── Brand styling ── */
         header[data-testid="stHeader"] {{ background-color: {BG_DARK}; }}
         div[data-testid="stMetric"] {{
