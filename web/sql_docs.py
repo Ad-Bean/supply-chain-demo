@@ -1,6 +1,4 @@
-"""Materialized view SQL definitions shown when 'Show SQL' is enabled."""
-
-import streamlit as st
+"""Materialized view SQL definitions for the dashboard."""
 
 MV_SQL = {
     "order_status": {
@@ -128,15 +126,3 @@ LEFT JOIN (
 ) gps ON s.truck_id = gps.truck_id;""",
     },
 }
-
-
-def show_sql(section_key: str):
-    """Render the SQL expander for a section if Show SQL is enabled."""
-    if not st.session_state.get("show_sql"):
-        return
-    mv = MV_SQL.get(section_key)
-    if not mv:
-        return
-    with st.expander(f"**{mv['name']}**, How this works in RisingWave", expanded=False):
-        st.markdown(mv["explain"])
-        st.code(mv["sql"], language="sql")
