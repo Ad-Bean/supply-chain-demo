@@ -216,7 +216,7 @@ QUERIES = {
     "warehouse_load": "SELECT * FROM mv_warehouse_load ORDER BY warehouse_id",
     "tracking":       "SELECT DISTINCT ON (truck_id) truck_id, lat, lon, speed_mph, "
                       "remaining_stops, destination FROM mv_shipment_tracking "
-                      "WHERE remaining_stops > 0 AND lat IS NOT NULL ORDER BY truck_id",
+                      "WHERE lat IS NOT NULL ORDER BY truck_id",
     "eta":            "SELECT shipment_id, truck_id, remaining_stops, speed_mph, "
                       "eta_minutes, delay_status, confidence "
                       "FROM mv_eta_predictions WHERE remaining_stops > 0 "

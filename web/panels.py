@@ -86,10 +86,15 @@ def _render_fleet_map_inner(data: dict):
             st.info("No GPS data yet.")
             return
         df["speed_mph"] = df["speed_mph"].apply(lambda x: round(float(x), 1) if x else 0)
-        df["status"] = df["speed_mph"].apply(
-            lambda s: "On Time" if s >= 40 else ("Slight Delay" if s >= 25 else "Delayed")
+        df["remaining_stops"] = df["remaining_stops"].apply(lambda x: int(x) if x else 0)
+        df["status"] = df.apply(
+            lambda r: "Delivered" if r["remaining_stops"] == 0
+            else ("On Time" if r["speed_mph"] >= 40
+                  else ("Slight Delay" if r["speed_mph"] >= 25 else "Delayed")),
+            axis=1,
         )
-        color_map = {"On Time": BRAND_GREEN, "Slight Delay": "#F59E0B", "Delayed": ERROR}
+        color_map = {"On Time": BRAND_GREEN, "Slight Delay": "#F59E0B",
+                     "Delayed": ERROR, "Delivered": "#6B7280"}
         fig = px.scatter_map(
             df, lat="lat", lon="lon", color="status",
             color_discrete_map=color_map,
