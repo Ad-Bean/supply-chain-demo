@@ -1,28 +1,212 @@
-"""Supply Chain Control Tower — Live Dashboard (Dash + Plotly)
-
-Run: PYTHONPATH=. .venv/bin/python3 web/app.py
-"""
+"""Supply Chain Control Tower — Live Streaming Dashboard (Streamlit)"""
 
 import threading
 import sys
 from pathlib import Path
 
-sys.path.insert(0, str(Path(__file__).parent.parent))
+import streamlit as st
 
-import dash
-from dash import html, dcc, dash_table, callback, Input, Output, State, ctx
-import plotly.express as px
-import plotly.graph_objects as go
-import pandas as pd
+sys.path.insert(0, str(Path(__file__).parent.parent))
 
 from db import query_batch
 from web.theme import (
-    BRAND_BLUE, BRAND_BLUE_LIGHT, BRAND_GREEN, BG_DARK, BG_ELEVATED, BG_CARD,
-    TEXT_MUTED, TEXT_DIM, BORDER_DARK, SUCCESS, WARNING, ERROR,
-    RW_LOGO, RW_ICON, RW_URL, RW_DOCS, RW_GITHUB, RW_CLOUD,
-    STAGE_COLORS, apply_rw_layout,
+    RW_ICON, RW_LOGO, RW_URL, RW_DOCS, RW_GITHUB, RW_CLOUD,
+    BRAND_BLUE_LIGHT, BRAND_GREEN, TEXT_MUTED, TEXT_DIM, ERROR,
+    inject_css,
 )
-from web.sql_docs import MV_SQL
+from web.panels import (
+    render_kpi, render_order_funnel, render_warehouse_load,
+    render_fleet_map, render_eta, render_alerts,
+    render_agent_actions, render_cascade,
+)
+
+# ── Page config ──────────────────────────────────────────────────────────────
+
+st.set_page_config(
+    page_title="RisingWave | Supply Chain Control Tower",
+    page_icon=RW_ICON,
+    layout="wide",
+)
+inject_css()
+
+# ── Background services ──────────────────────────────────────────────────────
+
+if "gen_stop" not in st.session_state:
+    st.session_state.gen_stop = threading.Event()
+if "agent_stop" not in st.session_state:
+    st.session_state.agent_stop = threading.Event()
+
+
+def _start_threads(stop_key, thread_configs):
+    st.session_state[stop_key] = threading.Event()
+    stop = st.session_state[stop_key]
+    for target, kwargs in thread_configs:
+        kwargs["stop_event"] = stop
+        threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
+
+
+def _on_gen_toggle():
+    if st.session_state.gen_toggle:
+        from generators.order_gen import run as run_orders
+        from generators.warehouse_gen import run as run_warehouse
+        from generators.shipment_gen import run as run_shipments
+        from generators.gps_gen import run as run_gps
+        _start_threads("gen_stop", [
+            (run_orders, {"interval": 2.0}),
+            (run_warehouse, {"interval": 3.0}),
+            (run_shipments, {"interval": 2.0}),
+            (run_gps, {"interval": 4.0}),
+        ])
+    else:
+        st.session_state.gen_stop.set()
+
+
+def _on_agent_toggle():
+    if st.session_state.agent_toggle:
+        from agents.disruption_agent import run as run_disruption
+        from agents.eta_agent import run as run_eta
+        from agents.notification_agent import run as run_notify
+        _start_threads("agent_stop", [
+            (run_disruption, {"poll_interval": 5.0}),
+            (run_eta, {"poll_interval": 15.0}),
+            (run_notify, {"poll_interval": 10.0}),
+        ])
+    else:
+        st.session_state.agent_stop.set()
+
+
+def _do_reset():
+    st.session_state.gen_stop.set()
+    st.session_state.agent_stop.set()
+    st.session_state.gen_toggle = False
+    st.session_state.agent_toggle = False
+    from scripts.reset import main as reset_main
+    reset_main()
+    _fetch_all.clear()
+
+
+# ── Sidebar ──────────────────────────────────────────────────────────────────
+
+with st.sidebar:
+    st.markdown(f"""
+    <div style="text-align:center; padding: 8px 0 12px 0;">
+        <a href="{RW_URL}" target="_blank">
+            <img src="{RW_LOGO}" alt="RisingWave" style="height:28px; margin-bottom:8px;" />
+        </a>
+        <p style="color: {BRAND_GREEN}; margin: 0; font-size: 0.7rem; text-transform: uppercase;
+                  letter-spacing: 0.1em;">
+            Supply Chain Control Tower
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    st.divider()
+
+    st.markdown(f'<p style="color:{BRAND_GREEN};font-size:0.7rem;text-transform:uppercase;'
+                f'letter-spacing:0.1em;margin-bottom:8px;">Data Pipeline</p>',
+                unsafe_allow_html=True)
+
+    st.toggle("Data Generators", key="gen_toggle", on_change=_on_gen_toggle,
+              help="Stream orders, warehouse events, shipments, and GPS pings")
+    st.toggle("AI Agents", key="agent_toggle", on_change=_on_agent_toggle,
+              help="3 agents: Disruption Response, ETA Prediction, Customer Notification")
+    st.toggle("Show SQL", key="show_sql",
+              help="Reveal the RisingWave materialized view definitions behind each panel")
+
+    REFRESH_OPTIONS = {"1s": 1, "2s": 2, "3s": 3, "5s": 5, "10s": 10, "30s": 30}
+
+    def _on_refresh_change():
+        st.session_state._refresh_sec = REFRESH_OPTIONS[st.session_state._refresh_sel]
+
+    refresh_label = st.selectbox("Refresh interval", list(REFRESH_OPTIONS.keys()), index=3,
+                                 key="_refresh_sel", on_change=_on_refresh_change,
+                                 help="How often the dashboard fetches fresh data from RisingWave")
+    if "_refresh_sec" not in st.session_state:
+        st.session_state._refresh_sec = REFRESH_OPTIONS[refresh_label]
+
+    st.divider()
+
+    st.markdown(f'<p style="color:{ERROR};font-size:0.7rem;text-transform:uppercase;'
+                f'letter-spacing:0.1em;margin-bottom:8px;">Simulate Disruption</p>',
+                unsafe_allow_html=True)
+
+    from generators.scenarios import SCENARIOS, pick_random_scenario, resolve_scenario
+
+    scenario_options = {f"{s['icon']} {s['name']}": s["id"] for s in SCENARIOS}
+    scenario_options["🎲 Random Scenario"] = "random"
+
+    selected = st.selectbox("Scenario", list(scenario_options.keys()),
+                            index=len(scenario_options) - 1)
+    scenario_id = scenario_options[selected]
+    wh_override = None
+
+    if scenario_id == "random":
+        st.caption("A random disruption will strike a random warehouse.")
+    else:
+        s = next(s for s in SCENARIOS if s["id"] == scenario_id)
+        wh_override = st.selectbox("Target Warehouse", s["warehouses"])
+        st.caption(f"Delay: {s['delay_range'][0]}-{s['delay_range'][1]} min (randomized)")
+
+    if st.button("Trigger Disruption", use_container_width=True):
+        from scripts.trigger_disruption import trigger
+        if scenario_id == "random":
+            resolved = pick_random_scenario()
+        else:
+            resolved = resolve_scenario(scenario_id, wh_override)
+        affected = trigger(resolved["warehouse"], resolved["delay"], resolved["detail"])
+        if affected > 0:
+            st.toast(f"{resolved['icon']} {resolved['name']} at {resolved['warehouse']} "
+                     f"— {resolved['delay']}min delay, {affected} orders affected!", icon="🚨")
+        else:
+            st.toast("No pending orders to disrupt. Let generators run a bit.", icon="⚠️")
+
+    def _do_resolve():
+        from db import execute_batch, query as db_query
+        import uuid
+        delayed = db_query("""
+            SELECT DISTINCT o.order_id, o.warehouse_id
+            FROM orders o
+            JOIN warehouse_events we ON o.order_id = we.order_id
+            WHERE we.event_type = 'delay'
+              AND o.order_id NOT IN (
+                  SELECT order_id FROM warehouse_events WHERE event_type = 'shipped'
+              )
+        """)
+        if delayed:
+            stmts = [
+                ("""INSERT INTO warehouse_events
+                    (event_id, order_id, warehouse_id, event_type, delay_minutes, detail)
+                    VALUES (%s, %s, %s, 'received', 0, 'Disruption resolved, order re-queued')""",
+                 (f"WE-{uuid.uuid4().hex[:8].upper()}", d["order_id"], d["warehouse_id"]))
+                for d in delayed
+            ]
+            execute_batch(stmts)
+        return len(delayed)
+
+    if st.button("Resolve All Disruptions", use_container_width=True):
+        count = _do_resolve()
+        if count > 0:
+            st.toast(f"Resolved {count} disrupted orders, re-queued for processing.", icon="✅")
+        else:
+            st.toast("No active disruptions to resolve.", icon="ℹ️")
+
+    st.divider()
+    st.button("Reset All Data", use_container_width=True, on_click=_do_reset)
+
+    st.markdown(f"""
+    <div style="padding-top:12px; text-align:center;">
+        <a href="{RW_DOCS}" target="_blank" style="color:{TEXT_MUTED};font-size:0.75rem;text-decoration:none;margin:0 8px;">Docs</a>
+        <a href="{RW_GITHUB}" target="_blank" style="color:{TEXT_MUTED};font-size:0.75rem;text-decoration:none;margin:0 8px;">GitHub</a>
+        <a href="{RW_CLOUD}" target="_blank" style="color:{TEXT_MUTED};font-size:0.75rem;text-decoration:none;margin:0 8px;">Cloud</a>
+    </div>
+    <div style="text-align:center; padding-top:8px;">
+        <p style="color:{TEXT_DIM};font-size:0.6rem;">
+            Powered by <a href="{RW_URL}" target="_blank" style="color:{BRAND_BLUE_LIGHT};text-decoration:none;">RisingWave</a>
+            Streaming Database
+        </p>
+    </div>
+    """, unsafe_allow_html=True)
+
 
 # ── Data layer ───────────────────────────────────────────────────────────────
 
@@ -47,478 +231,76 @@ QUERIES = {
 }
 
 
-def fetch_all():
+@st.cache_data(ttl=1, show_spinner=False)
+def _fetch_all():
     try:
         return query_batch(QUERIES)
     except Exception:
         return {key: [] for key in QUERIES}
 
 
-# ── Background services ──────────────────────────────────────────────────────
+# ── Header ───────────────────────────────────────────────────────────────────
 
-_gen_stop = threading.Event()
-_agent_stop = threading.Event()
-_gen_running = False
-_agent_running = False
+st.markdown(f"""
+<div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
+    <div>
+        <h1 style="margin:0;font-size:1.6rem;color:#FFFFFF;font-weight:400;">
+            Supply Chain Control Tower
+        </h1>
+        <p style="margin:0;color:{TEXT_MUTED};font-size:0.8rem;">
+            Real-time monitoring powered by
+            <a href="{RW_DOCS}" target="_blank" style="color:{BRAND_BLUE_LIGHT};text-decoration:none;">RisingWave</a>
+            streaming materialized views +
+            <span style="color:{BRAND_GREEN};">AI Agent</span>
+        </p>
+    </div>
+</div>
+""", unsafe_allow_html=True)
 
+st.write("")
 
-def start_generators():
-    global _gen_stop, _gen_running
-    if _gen_running:
-        return
-    _gen_stop = threading.Event()
-    from generators.order_gen import run as run_orders
-    from generators.warehouse_gen import run as run_warehouse
-    from generators.shipment_gen import run as run_shipments
-    from generators.gps_gen import run as run_gps
-    for target, kwargs in [
-        (run_orders, {"interval": 2.0, "stop_event": _gen_stop}),
-        (run_warehouse, {"interval": 3.0, "stop_event": _gen_stop}),
-        (run_shipments, {"interval": 2.0, "stop_event": _gen_stop}),
-        (run_gps, {"interval": 4.0, "stop_event": _gen_stop}),
-    ]:
-        threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
-    _gen_running = True
-
-
-def stop_generators():
-    global _gen_running
-    _gen_stop.set()
-    _gen_running = False
-
-
-def start_agents():
-    global _agent_stop, _agent_running
-    if _agent_running:
-        return
-    _agent_stop = threading.Event()
-    from agents.disruption_agent import run as run_disruption
-    from agents.eta_agent import run as run_eta
-    from agents.notification_agent import run as run_notify
-    for target, kwargs in [
-        (run_disruption, {"poll_interval": 5.0, "stop_event": _agent_stop}),
-        (run_eta, {"poll_interval": 15.0, "stop_event": _agent_stop}),
-        (run_notify, {"poll_interval": 10.0, "stop_event": _agent_stop}),
-    ]:
-        threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
-    _agent_running = True
-
-
-def stop_agents():
-    global _agent_running
-    _agent_stop.set()
-    _agent_running = False
-
-
-# ── Dash App ─────────────────────────────────────────────────────────────────
-
-app = dash.Dash(
-    __name__,
-    title="RisingWave | Supply Chain Control Tower",
-    update_title=None,  # don't show "Updating..." in tab
-)
-
-# ── CSS ──────────────────────────────────────────────────────────────────────
-
-CARD_STYLE = {
-    "background": BG_CARD, "border": f"1px solid {BORDER_DARK}",
-    "borderRadius": "8px", "padding": "16px", "marginBottom": "12px",
-}
-METRIC_STYLE = {
-    **CARD_STYLE, "textAlign": "center", "flex": "1",
-}
-SECTION_TITLE = {
-    "color": BRAND_GREEN, "fontSize": "0.9rem", "textTransform": "uppercase",
-    "letterSpacing": "0.08em", "marginBottom": "8px", "marginTop": "16px",
-}
-TABLE_STYLE_HEADER = {
-    "backgroundColor": BG_ELEVATED, "color": "#fff",
-    "fontWeight": "500", "fontSize": "0.8rem", "border": f"1px solid {BORDER_DARK}",
-}
-TABLE_STYLE_DATA = {
-    "backgroundColor": BG_CARD, "color": TEXT_MUTED,
-    "fontSize": "0.8rem", "border": f"1px solid {BORDER_DARK}",
-}
-TABLE_STYLE_CELL = {
-    "textAlign": "left", "padding": "8px", "overflow": "hidden",
-    "textOverflow": "ellipsis", "maxWidth": "200px",
-}
-
-
-def make_metric(label, value, id_suffix):
-    return html.Div(style=METRIC_STYLE, children=[
-        html.Div(label, style={"color": TEXT_MUTED, "fontSize": "0.7rem",
-                                "textTransform": "uppercase", "letterSpacing": "0.05em"}),
-        html.Div(id=f"metric-{id_suffix}", children=str(value),
-                 style={"color": "#fff", "fontSize": "1.8rem", "fontWeight": "400"}),
-    ])
-
-
-def make_table(id, columns):
-    return dash_table.DataTable(
-        id=id, columns=[{"name": c, "id": c} for c in columns],
-        data=[], page_size=10,
-        style_header=TABLE_STYLE_HEADER,
-        style_data=TABLE_STYLE_DATA,
-        style_cell=TABLE_STYLE_CELL,
-        style_table={"overflowX": "auto"},
+if st.session_state.get("show_sql"):
+    st.info(
+        "**What are Materialized Views?** "
+        "In RisingWave, a materialized view is a SQL query whose result is **continuously maintained** "
+        "as new data arrives. Unlike traditional databases that re-run the query on each read, "
+        "RisingWave incrementally updates only the affected rows, giving you fresh results in "
+        "milliseconds, not minutes. Each panel below is backed by a streaming MV. "
+        "Expand any section to see the SQL.",
+        icon="🌊",
     )
 
+_refresh = st.session_state.get("_refresh_sec", 5)
+st.caption(f"Live dashboard refreshing every {_refresh}s.")
 
-# ── Layout ───────────────────────────────────────────────────────────────────
+# ── Single live fragment with fade-in animation ──────────────────────────────
 
-app.layout = html.Div(style={"backgroundColor": BG_DARK, "minHeight": "100vh",
-                              "color": "#fff", "fontFamily": "Inter, sans-serif"}, children=[
-
-    # Interval timer
-    dcc.Interval(id="interval", interval=5000, n_intervals=0),
-
-    # Header
-    html.Div(style={"padding": "16px 24px", "display": "flex", "alignItems": "center",
-                     "gap": "16px", "borderBottom": f"1px solid {BORDER_DARK}"}, children=[
-        html.A(href=RW_URL, target="_blank", children=[
-            html.Img(src=RW_LOGO, style={"height": "28px"}),
-        ]),
-        html.Div(children=[
-            html.H1("Supply Chain Control Tower",
-                     style={"margin": "0", "fontSize": "1.4rem", "fontWeight": "400"}),
-            html.P([
-                "Real-time monitoring powered by ",
-                html.A("RisingWave", href=RW_DOCS, target="_blank",
-                       style={"color": BRAND_BLUE_LIGHT, "textDecoration": "none"}),
-                " streaming materialized views + ",
-                html.Span("AI Agent", style={"color": BRAND_GREEN}),
-            ], style={"margin": "0", "color": TEXT_MUTED, "fontSize": "0.8rem"}),
-        ]),
-        # Controls
-        html.Div(style={"marginLeft": "auto", "display": "flex", "gap": "8px",
-                         "alignItems": "center"}, children=[
-            html.Button("Start Generators", id="btn-gen", n_clicks=0,
-                        style={"padding": "6px 14px", "borderRadius": "6px", "border": "none",
-                               "background": BRAND_BLUE, "color": "#fff", "cursor": "pointer",
-                               "fontSize": "0.8rem"}),
-            html.Button("Start Agents", id="btn-agent", n_clicks=0,
-                        style={"padding": "6px 14px", "borderRadius": "6px", "border": "none",
-                               "background": BRAND_GREEN, "color": BG_DARK, "cursor": "pointer",
-                               "fontSize": "0.8rem"}),
-            html.Button("Trigger Disruption", id="btn-disrupt", n_clicks=0,
-                        style={"padding": "6px 14px", "borderRadius": "6px", "border": "none",
-                               "background": ERROR, "color": "#fff", "cursor": "pointer",
-                               "fontSize": "0.8rem"}),
-            html.Button("Reset", id="btn-reset", n_clicks=0,
-                        style={"padding": "6px 14px", "borderRadius": "6px", "border": "none",
-                               "background": TEXT_DIM, "color": "#fff", "cursor": "pointer",
-                               "fontSize": "0.8rem"}),
-            dcc.Dropdown(
-                id="refresh-dropdown",
-                options=[{"label": f"{s}s", "value": s * 1000} for s in [1, 2, 3, 5, 10, 30]],
-                value=5000, clearable=False,
-                style={"width": "80px", "fontSize": "0.8rem"},
-            ),
-            html.Div(id="status-text", style={"color": TEXT_MUTED, "fontSize": "0.75rem"}),
-        ]),
-    ]),
-
-    # Main content
-    html.Div(style={"padding": "16px 24px"}, children=[
-
-        # KPI metrics row
-        html.Div(style={"display": "flex", "gap": "12px", "marginBottom": "16px"}, children=[
-            make_metric("Total Orders", "0", "total"),
-            make_metric("Shipped", "0", "shipped"),
-            make_metric("Delayed", "0", "delayed"),
-            make_metric("Agent Actions", "0", "actions"),
-        ]),
-
-        # Row 2: Order Funnel + Warehouse Load
-        html.Div(style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "16px"}, children=[
-            html.Div(style=CARD_STYLE, children=[
-                html.H3("Order Fulfillment", style=SECTION_TITLE),
-                dcc.Graph(id="chart-funnel", config={"displayModeBar": False}),
-            ]),
-            html.Div(style=CARD_STYLE, children=[
-                html.H3("Warehouse Load", style=SECTION_TITLE),
-                make_table("table-warehouse", ["Warehouse", "Total", "Pending", "Picking",
-                                                "Packed", "Shipped", "Delayed", "Delay (min)"]),
-            ]),
-        ]),
-
-        # Row 3: Fleet Map
-        html.Details(open=False, style=CARD_STYLE, children=[
-            html.Summary("Fleet Map — Live truck positions",
-                         style={"cursor": "pointer", **SECTION_TITLE}),
-            dcc.Graph(id="chart-map", config={"displayModeBar": False}),
-        ]),
-
-        # Row 4: ETA + Alerts
-        html.Div(style={"display": "grid", "gridTemplateColumns": "1fr 1fr", "gap": "16px"}, children=[
-            html.Div(style=CARD_STYLE, children=[
-                html.H3("Fleet ETA Predictions", style=SECTION_TITLE),
-                make_table("table-eta", ["Shipment", "Truck", "Stops Left", "Speed",
-                                          "ETA (min)", "Status", "Confidence"]),
-            ]),
-            html.Div(style=CARD_STYLE, children=[
-                html.H3("Delay Alerts", style=SECTION_TITLE),
-                make_table("table-alerts", ["Source", "Origin", "Order", "Delay (min)",
-                                             "Reason"]),
-            ]),
-        ]),
-
-        # Row 5: Agent Actions
-        html.Div(style=CARD_STYLE, children=[
-            html.H3("AI Agent Actions", style=SECTION_TITLE),
-            html.Div(id="agent-metrics", style={"display": "flex", "gap": "12px",
-                                                  "marginBottom": "12px"}),
-            make_table("table-actions", ["Agent", "Action", "Target", "Reasoning", "Detail"]),
-        ]),
-
-        # Row 6: Cascade Impact
-        html.Div(style=CARD_STYLE, children=[
-            html.H3("Cascade Impact", style=SECTION_TITLE),
-            make_table("table-cascade", ["Warehouse", "Delay (min)", "Order", "Customer",
-                                          "Priority", "Shipment", "Truck", "Destination"]),
-        ]),
-
-        # Footer
-        html.Div(style={"textAlign": "center", "padding": "24px 0 12px 0"}, children=[
-            html.A("Docs", href=RW_DOCS, target="_blank",
-                   style={"color": TEXT_MUTED, "margin": "0 12px", "fontSize": "0.75rem",
-                          "textDecoration": "none"}),
-            html.A("GitHub", href=RW_GITHUB, target="_blank",
-                   style={"color": TEXT_MUTED, "margin": "0 12px", "fontSize": "0.75rem",
-                          "textDecoration": "none"}),
-            html.A("Cloud", href=RW_CLOUD, target="_blank",
-                   style={"color": TEXT_MUTED, "margin": "0 12px", "fontSize": "0.75rem",
-                          "textDecoration": "none"}),
-            html.P(["Powered by ",
-                     html.A("RisingWave", href=RW_URL, target="_blank",
-                            style={"color": BRAND_BLUE_LIGHT, "textDecoration": "none"}),
-                     " Streaming Database"],
-                    style={"color": TEXT_DIM, "fontSize": "0.6rem", "marginTop": "8px"}),
-        ]),
-    ]),
-])
-
-# ── Callbacks ────────────────────────────────────────────────────────────────
-
-# Update refresh interval
-@callback(Output("interval", "interval"), Input("refresh-dropdown", "value"))
-def update_interval(val):
-    return val
+_refresh = st.session_state.get("_refresh_sec", 5)
 
 
-# Control buttons
-@callback(
-    Output("status-text", "children"),
-    Input("btn-gen", "n_clicks"),
-    Input("btn-agent", "n_clicks"),
-    Input("btn-disrupt", "n_clicks"),
-    Input("btn-reset", "n_clicks"),
-    prevent_initial_call=True,
-)
-def handle_buttons(gen_clicks, agent_clicks, disrupt_clicks, reset_clicks):
-    triggered = ctx.triggered_id
-    if triggered == "btn-gen":
-        if _gen_running:
-            stop_generators()
-            return "Generators stopped"
-        else:
-            start_generators()
-            return "Generators started"
-    elif triggered == "btn-agent":
-        if _agent_running:
-            stop_agents()
-            return "Agents stopped"
-        else:
-            start_agents()
-            return "Agents started"
-    elif triggered == "btn-disrupt":
-        from generators.scenarios import pick_random_scenario
-        from scripts.trigger_disruption import trigger
-        scenario = pick_random_scenario()
-        affected = trigger(scenario["warehouse"], scenario["delay"], scenario["detail"])
-        return f"{scenario['icon']} {scenario['name']} @ {scenario['warehouse']} — {affected} orders"
-    elif triggered == "btn-reset":
-        stop_generators()
-        stop_agents()
-        from scripts.reset import main as reset_main
-        reset_main()
-        return "All data reset"
-    return ""
+@st.fragment(run_every=_refresh)
+def _live_dashboard():
+    data = _fetch_all()
+
+    render_kpi(data)
+    st.write("")
+
+    col_l, col_r = st.columns(2)
+    with col_l:
+        render_order_funnel(data)
+    with col_r:
+        render_warehouse_load(data)
+
+    render_fleet_map(data)
+
+    col_l2, col_r2 = st.columns(2)
+    with col_l2:
+        render_eta(data)
+    with col_r2:
+        render_alerts(data)
+
+    render_agent_actions(data)
+    render_cascade(data)
 
 
-# Update button labels to reflect state
-@callback(
-    Output("btn-gen", "children"),
-    Output("btn-agent", "children"),
-    Input("interval", "n_intervals"),
-)
-def update_button_labels(_):
-    gen_label = "Stop Generators" if _gen_running else "Start Generators"
-    agent_label = "Stop Agents" if _agent_running else "Start Agents"
-    return gen_label, agent_label
-
-
-# Main data refresh — updates ALL panels on each interval tick
-@callback(
-    # KPI metrics
-    Output("metric-total", "children"),
-    Output("metric-shipped", "children"),
-    Output("metric-delayed", "children"),
-    Output("metric-actions", "children"),
-    # Charts
-    Output("chart-funnel", "figure"),
-    Output("chart-map", "figure"),
-    # Tables
-    Output("table-warehouse", "data"),
-    Output("table-eta", "data"),
-    Output("table-alerts", "data"),
-    Output("table-actions", "data"),
-    Output("table-cascade", "data"),
-    # Agent action metrics
-    Output("agent-metrics", "children"),
-    # Trigger
-    Input("interval", "n_intervals"),
-)
-def refresh_dashboard(_):
-    data = fetch_all()
-
-    # KPI
-    odf = pd.DataFrame(data["order_status"]) if data["order_status"] else pd.DataFrame()
-    adf = pd.DataFrame(data["agent_counts"]) if data["agent_counts"] else pd.DataFrame()
-    total = int(odf["cnt"].sum()) if not odf.empty else 0
-    shipped = int(odf.loc[odf["current_status"] == "shipped", "cnt"].sum()) if not odf.empty else 0
-    delayed = int(odf.loc[odf["current_status"] == "delay", "cnt"].sum()) if not odf.empty else 0
-    agent_acts = int(adf["cnt"].sum()) if not adf.empty else 0
-
-    # Order funnel chart
-    if not odf.empty:
-        cats = ["received", "picking", "packed", "shipped", "delay"]
-        fdf = odf.copy()
-        fdf["current_status"] = pd.Categorical(fdf["current_status"], categories=cats, ordered=True)
-        fdf = fdf.sort_values("current_status").dropna(subset=["current_status"])
-        funnel_fig = px.bar(fdf, x="current_status", y="cnt", color="current_status",
-                            color_discrete_map=STAGE_COLORS,
-                            labels={"current_status": "Status", "cnt": "Count"})
-        funnel_fig.update_layout(showlegend=False)
-        apply_rw_layout(funnel_fig, height=300)
-    else:
-        funnel_fig = go.Figure()
-        apply_rw_layout(funnel_fig, height=300)
-
-    # Fleet map
-    if data.get("tracking"):
-        tdf = pd.DataFrame(data["tracking"])
-        tdf = tdf.dropna(subset=["lat", "lon"])
-        tdf["lat"] = tdf["lat"].astype(float)
-        tdf["lon"] = tdf["lon"].astype(float)
-        tdf["speed_mph"] = tdf["speed_mph"].apply(lambda x: round(float(x), 1) if x else 0)
-        tdf["status"] = tdf["speed_mph"].apply(
-            lambda s: "On Time" if s >= 40 else ("Slight Delay" if s >= 25 else "Delayed")
-        )
-        color_map = {"On Time": BRAND_GREEN, "Slight Delay": WARNING, "Delayed": ERROR}
-        map_fig = px.scatter_map(
-            tdf, lat="lat", lon="lon", color="status", color_discrete_map=color_map,
-            hover_name="truck_id",
-            hover_data={"speed_mph": True, "remaining_stops": True,
-                        "destination": True, "status": False, "lat": False, "lon": False},
-            zoom=3, center={"lat": 37.5, "lon": -96},
-        )
-        map_fig.update_layout(
-            height=350, margin=dict(t=0, b=0, l=0, r=0),
-            paper_bgcolor="rgba(0,0,0,0)", map_style="carto-darkmatter",
-            legend=dict(bgcolor="rgba(0,0,0,0.5)", font=dict(color="#fff", size=11),
-                        orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01),
-        )
-        map_fig.update_traces(marker=dict(size=10))
-    else:
-        map_fig = go.Figure()
-        map_fig.update_layout(height=350, margin=dict(t=0, b=0, l=0, r=0),
-                              paper_bgcolor="rgba(0,0,0,0)")
-
-    # Warehouse load table
-    wh_data = []
-    if data["warehouse_load"]:
-        for r in data["warehouse_load"]:
-            wh_data.append({
-                "Warehouse": r["warehouse_id"], "Total": r["total_orders"],
-                "Pending": r["pending"], "Picking": r["picking"], "Packed": r["packed"],
-                "Shipped": r["shipped"], "Delayed": r["delayed"],
-                "Delay (min)": r["total_delay_min"],
-            })
-
-    # ETA table
-    eta_data = []
-    if data["eta"]:
-        for r in data["eta"]:
-            eta_data.append({
-                "Shipment": r["shipment_id"], "Truck": r["truck_id"],
-                "Stops Left": r["remaining_stops"],
-                "Speed": round(float(r["speed_mph"]), 1) if r["speed_mph"] else 0,
-                "ETA (min)": round(float(r["eta_minutes"]), 1) if r["eta_minutes"] else "N/A",
-                "Status": r["delay_status"], "Confidence": r["confidence"],
-            })
-
-    # Alerts table
-    alert_data = []
-    if data["alerts"]:
-        for r in data["alerts"]:
-            alert_data.append({
-                "Source": r["alert_source"], "Origin": r["source_id"],
-                "Order": r["affected_id"], "Delay (min)": r["delay_minutes"],
-                "Reason": r["reason"],
-            })
-
-    # Actions table + metrics
-    action_data = []
-    reroutes = notifies = escalations = 0
-    if data["actions"]:
-        for r in data["actions"]:
-            action_data.append({
-                "Agent": r["agent_name"], "Action": r["action_type"],
-                "Target": r["target_id"], "Reasoning": r["reasoning"],
-                "Detail": r["detail"],
-            })
-            if r["action_type"] == "reroute": reroutes += 1
-            elif r["action_type"] == "notify": notifies += 1
-            elif r["action_type"] == "escalate": escalations += 1
-
-    agent_metric_cards = [
-        html.Div(style={**METRIC_STYLE, "padding": "8px 12px"}, children=[
-            html.Div("Reroutes", style={"color": TEXT_MUTED, "fontSize": "0.65rem",
-                                         "textTransform": "uppercase"}),
-            html.Div(str(reroutes), style={"color": BRAND_GREEN, "fontSize": "1.4rem"}),
-        ]),
-        html.Div(style={**METRIC_STYLE, "padding": "8px 12px"}, children=[
-            html.Div("Notifications", style={"color": TEXT_MUTED, "fontSize": "0.65rem",
-                                              "textTransform": "uppercase"}),
-            html.Div(str(notifies), style={"color": BRAND_BLUE_LIGHT, "fontSize": "1.4rem"}),
-        ]),
-        html.Div(style={**METRIC_STYLE, "padding": "8px 12px"}, children=[
-            html.Div("Escalations", style={"color": TEXT_MUTED, "fontSize": "0.65rem",
-                                            "textTransform": "uppercase"}),
-            html.Div(str(escalations), style={"color": ERROR, "fontSize": "1.4rem"}),
-        ]),
-    ]
-
-    # Cascade table
-    cascade_data = []
-    if data["cascade"]:
-        for r in data["cascade"]:
-            cascade_data.append({
-                "Warehouse": r["warehouse_id"], "Delay (min)": r["warehouse_delay_min"],
-                "Order": r["order_id"], "Customer": r["customer_name"],
-                "Priority": r["priority"], "Shipment": r.get("shipment_id", ""),
-                "Truck": r.get("truck_id", ""), "Destination": r.get("destination", ""),
-            })
-
-    return (
-        str(total), str(shipped), str(delayed), str(agent_acts),
-        funnel_fig, map_fig,
-        wh_data, eta_data, alert_data, action_data, cascade_data,
-        agent_metric_cards,
-    )
-
-
-if __name__ == "__main__":
-    app.run(debug=True, host="0.0.0.0", port=8501)
+_live_dashboard()

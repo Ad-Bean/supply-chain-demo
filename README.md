@@ -23,13 +23,14 @@ Orders come in → Warehouse processes them → Shipments go out → Trucks deli
 The entire demo runs from a single browser tab:
 
 ```bash
-PYTHONPATH=. python3 web/app.py
+PYTHONPATH=. .venv/bin/streamlit run web/app.py
 ```
 
-1. Click **Start Generators** — orders start flowing
-2. Click **Start Agents** — 3 AI agents start watching
+1. Toggle **Data Generators** ON — orders start flowing
+2. Toggle **AI Agents** ON — 3 agents start watching
 3. Wait ~20 seconds for orders to build up
-4. Click **Trigger Disruption** — watch the cascade and agent response in real-time
+4. Select a disruption scenario and click **Trigger Disruption**
+5. Watch the cascade and agent response in real-time
 
 ## Architecture
 
@@ -43,8 +44,8 @@ gps_gen.py        →    gps_pings table              notification_agent.py
                        ↓                                ↓
                        6 materialized views          agent_actions table
                        (auto-updating)                  ↓
-                       ↓                            Dash dashboard
-                       Dash dashboard
+                       ↓                            Streamlit dashboard
+                       Streamlit dashboard
 ```
 
 ## AI Agents
@@ -87,9 +88,27 @@ cp .env.example .env
 # 3. Create schema (once)
 PYTHONPATH=. .venv/bin/python3 scripts/setup_schema.py
 
-# 4. Run dashboard
-PYTHONPATH=. .venv/bin/python3 web/app.py
+# 4. Run
+PYTHONPATH=. .venv/bin/streamlit run web/app.py
 ```
+
+### Streamlit Cloud Deployment
+
+1. Push this repo to GitHub
+2. Go to [share.streamlit.io](https://share.streamlit.io)
+3. Connect your repo, set **Main file path** to `web/app.py`
+4. In **Settings > Secrets**, paste your credentials:
+   ```toml
+   RW_HOST = "your-risingwave-host.risingwave.cloud"
+   RW_PORT = "4566"
+   RW_USER = "your-user"
+   RW_PASSWORD = "your-password"
+   RW_DATABASE = "dev"
+   RW_SSLMODE = "require"
+   OPENROUTER_API_KEY = "your-openrouter-key"
+   OPENROUTER_MODEL = "your-chosen-model"
+   ```
+5. Deploy
 
 ### CLI Mode (no browser)
 
@@ -111,8 +130,11 @@ PYTHONPATH=. .venv/bin/python3 scripts/dashboard_query.py
 
 ```
 supply-chain-demo/
+├── .streamlit/
+│   └── config.toml                    # Streamlit theme (RisingWave dark)
 ├── web/
-│   ├── app.py                         # Dash dashboard (main entry point)
+│   ├── app.py                         # Streamlit dashboard (main entry point)
+│   ├── panels.py                      # Dashboard panel render functions
 │   ├── theme.py                       # RisingWave brand tokens + Plotly theming
 │   └── sql_docs.py                    # MV SQL definitions for Show SQL mode
 ├── agents/
@@ -140,7 +162,7 @@ supply-chain-demo/
 │   ├── trigger_disruption.py          # Inject chaos
 │   ├── reset.py                       # Clear all data
 │   └── dashboard_query.py             # CLI dashboard
-├── config.py                          # Shared config from .env
+├── config.py                          # Shared config (.env + st.secrets)
 ├── db.py                              # RisingWave connection helper
 ├── requirements.txt                   # Python dependencies
 ├── pyproject.toml                     # Project metadata
@@ -164,6 +186,6 @@ supply-chain-demo/
 ## Tech Stack
 
 - **[RisingWave](https://risingwave.com)** — Streaming database with PostgreSQL-compatible SQL
-- **[Dash](https://dash.plotly.com)** — Real-time web dashboard with zero-flicker updates
+- **[Streamlit](https://streamlit.io)** — Real-time web dashboard, deployable to Streamlit Cloud
 - **[OpenRouter](https://openrouter.ai)** — LLM API for AI agent reasoning
-- **[Plotly](https://plotly.com)** — Interactive charts with smooth transitions
+- **[Plotly](https://plotly.com)** — Interactive charts
