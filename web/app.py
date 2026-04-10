@@ -288,8 +288,10 @@ _refresh = st.session_state.get("_refresh_sec", 5)
 def _live_dashboard():
     data = _fetch_all()
 
-    # Live architecture diagram
-    render_pipeline(data)
+    # Live architecture diagram (visible when Show SQL is on)
+    if st.session_state.get("show_sql"):
+        with st.expander("Architecture — Live Data Pipeline", expanded=False):
+            render_pipeline(data)
 
     render_kpi(data)
     st.write("")
