@@ -23,14 +23,13 @@ Orders come in → Warehouse processes them → Shipments go out → Trucks deli
 The entire demo runs from a single browser tab:
 
 ```bash
-PYTHONPATH=. .venv/bin/streamlit run web/app.py
+PYTHONPATH=. python3 web/app.py
 ```
 
-1. Toggle **Data Generators** ON — orders start flowing
-2. Toggle **AI Agents** ON — 3 agents start watching
+1. Click **Start Generators** — orders start flowing
+2. Click **Start Agents** — 3 AI agents start watching
 3. Wait ~20 seconds for orders to build up
-4. Select a disruption scenario and click **TRIGGER DISRUPTION**
-5. Watch the cascade and agent response in real-time
+4. Click **Trigger Disruption** — watch the cascade and agent response in real-time
 
 ## Architecture
 
@@ -38,14 +37,14 @@ PYTHONPATH=. .venv/bin/streamlit run web/app.py
 Data Generators          RisingWave Cloud              AI Agents
 ─────────────────      ──────────────────────      ─────────────────
 orders_gen.py     →    orders table                 disruption_agent.py
-warehouse_gen.py  →    warehouse_events table   ←── ── queries MVs
+warehouse_gen.py  →    warehouse_events table   ←── queries MVs
 shipment_gen.py   →    shipments table              eta_agent.py
 gps_gen.py        →    gps_pings table              notification_agent.py
                        ↓                                ↓
                        6 materialized views          agent_actions table
                        (auto-updating)                  ↓
-                       ↓                            Streamlit dashboard
-                       Streamlit dashboard
+                       ↓                            Dash dashboard
+                       Dash dashboard
 ```
 
 ## AI Agents
@@ -88,17 +87,9 @@ cp .env.example .env
 # 3. Create schema (once)
 PYTHONPATH=. .venv/bin/python3 scripts/setup_schema.py
 
-# 4. Run
-PYTHONPATH=. .venv/bin/streamlit run web/app.py
+# 4. Run dashboard
+PYTHONPATH=. .venv/bin/python3 web/app.py
 ```
-
-### Streamlit Cloud Deployment
-
-1. Push this repo to GitHub
-2. Go to [share.streamlit.io](https://share.streamlit.io)
-3. Connect your repo, set **Main file path** to `web/app.py`
-4. In **Settings > Secrets**, paste your credentials (see `.streamlit/secrets.toml.example`)
-5. Deploy
 
 ### CLI Mode (no browser)
 
@@ -120,11 +111,10 @@ PYTHONPATH=. .venv/bin/python3 scripts/dashboard_query.py
 
 ```
 supply-chain-demo/
-├── .streamlit/
-│   ├── config.toml                    # Streamlit theme (RisingWave dark)
-│   └── secrets.toml.example           # Streamlit Cloud secrets template
 ├── web/
-│   └── app.py                         # Streamlit dashboard (main entry point)
+│   ├── app.py                         # Dash dashboard (main entry point)
+│   ├── theme.py                       # RisingWave brand tokens + Plotly theming
+│   └── sql_docs.py                    # MV SQL definitions for Show SQL mode
 ├── agents/
 │   ├── disruption_agent.py            # Disruption response (reroute/escalate)
 │   ├── eta_agent.py                   # ETA prediction (LLM-enriched)
@@ -150,7 +140,7 @@ supply-chain-demo/
 │   ├── trigger_disruption.py          # Inject chaos
 │   ├── reset.py                       # Clear all data
 │   └── dashboard_query.py             # CLI dashboard
-├── config.py                          # Shared config (.env + st.secrets)
+├── config.py                          # Shared config from .env
 ├── db.py                              # RisingWave connection helper
 ├── requirements.txt                   # Python dependencies
 ├── pyproject.toml                     # Project metadata
@@ -168,12 +158,12 @@ supply-chain-demo/
 | `RW_DATABASE` | Database name | `dev` |
 | `RW_SSLMODE` | SSL mode | `prefer` |
 | `OPENROUTER_API_KEY` | OpenRouter API key | |
-| `OPENROUTER_MODEL` | LLM model | `minimax/minimax-m2.5:free` |
+| `OPENROUTER_MODEL` | LLM model for AI agents | |
 | `GENERATOR_SPEED` | Speed multiplier | `1.0` |
 
 ## Tech Stack
 
 - **[RisingWave](https://risingwave.com)** — Streaming database with PostgreSQL-compatible SQL
-- **[Streamlit](https://streamlit.io)** — Real-time web dashboard
-- **[OpenRouter](https://openrouter.ai)** — LLM API (minimax M2.5 free tier)
-- **[Plotly](https://plotly.com)** — Interactive charts
+- **[Dash](https://dash.plotly.com)** — Real-time web dashboard with zero-flicker updates
+- **[OpenRouter](https://openrouter.ai)** — LLM API for AI agent reasoning
+- **[Plotly](https://plotly.com)** — Interactive charts with smooth transitions
