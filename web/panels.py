@@ -11,8 +11,103 @@ import streamlit as st
 import pandas as pd
 import plotly.express as px
 
-from web.theme import STAGE_COLORS, SUCCESS, BRAND_GREEN, ERROR, apply_rw_layout
+from web.theme import (
+    STAGE_COLORS, SUCCESS, BRAND_GREEN, BRAND_BLUE, BRAND_BLUE_LIGHT,
+    ERROR, WARNING, BG_CARD, BG_ELEVATED, BORDER_DARK, TEXT_MUTED, TEXT_DIM,
+    apply_rw_layout,
+)
 from web.sql_docs import show_sql
+
+
+def render_pipeline(data: dict):
+    """Render the live architecture pipeline showing data flow + counts."""
+    counts = data["counts"][0] if data.get("counts") else {}
+    orders = counts.get("orders", 0)
+    wh_events = counts.get("wh_events", 0)
+    shipments = counts.get("shipments", 0)
+    gps = counts.get("gps_pings", 0)
+    actions = counts.get("agent_actions", 0)
+
+    # Count alerts and delayed
+    odf = pd.DataFrame(data["order_status"]) if data.get("order_status") else pd.DataFrame()
+    delayed = int(odf.loc[odf["current_status"] == "delay", "cnt"].sum()) if not odf.empty and "current_status" in odf.columns else 0
+    alert_count = len(data.get("alerts", []))
+
+    def _node(label, count, color, icon):
+        active = "1" if count > 0 else "0.4"
+        pulse = f"box-shadow: 0 0 8px {color};" if count > 0 else ""
+        return (
+            f'<div style="text-align:center;opacity:{active};">'
+            f'<div style="background:{BG_ELEVATED};border:2px solid {color};border-radius:10px;'
+            f'padding:10px 16px;display:inline-block;min-width:90px;{pulse}">'
+            f'<div style="font-size:1.2rem;">{icon}</div>'
+            f'<div style="color:#fff;font-size:0.75rem;font-weight:500;margin-top:2px;">{label}</div>'
+            f'<div style="color:{color};font-size:1.1rem;font-weight:600;">{count:,}</div>'
+            f'</div></div>'
+        )
+
+    def _arrow(color=TEXT_DIM):
+        return f'<div style="color:{color};font-size:1.2rem;align-self:center;">→</div>'
+
+    def _down_arrow(color=TEXT_DIM):
+        return f'<div style="text-align:center;color:{color};font-size:1.2rem;padding:4px 0;">↓</div>'
+
+    # Row 1: Data Pipeline
+    st.markdown(
+        f'<div style="display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;">'
+        f'{_node("Orders", orders, BRAND_BLUE, "📦")}'
+        f'{_arrow()}'
+        f'{_node("Warehouse", wh_events, WARNING, "🏭")}'
+        f'{_arrow()}'
+        f'{_node("Shipments", shipments, "#8B5CF6", "🚛")}'
+        f'{_arrow()}'
+        f'{_node("GPS Pings", gps, BRAND_BLUE_LIGHT, "📡")}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Row 2: Arrow down to RisingWave
+    st.markdown(
+        f'<div style="text-align:center;color:{TEXT_DIM};font-size:1rem;padding:4px 0;">↓ streamed into ↓</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Row 3: RisingWave MVs
+    st.markdown(
+        f'<div style="display:flex;justify-content:center;">'
+        f'<div style="background:{BG_ELEVATED};border:2px solid {BRAND_BLUE};border-radius:12px;'
+        f'padding:12px 32px;text-align:center;box-shadow:0 0 12px {BRAND_BLUE}40;">'
+        f'<div style="color:{BRAND_BLUE_LIGHT};font-size:0.65rem;text-transform:uppercase;'
+        f'letter-spacing:0.1em;">RisingWave Streaming Database</div>'
+        f'<div style="color:#fff;font-size:1rem;font-weight:500;margin-top:4px;">'
+        f'6 Materialized Views</div>'
+        f'<div style="color:{TEXT_MUTED};font-size:0.75rem;margin-top:2px;">'
+        f'Incrementally updated in real-time</div>'
+        f'</div></div>',
+        unsafe_allow_html=True,
+    )
+
+    # Row 4: Arrow down to outputs
+    st.markdown(
+        f'<div style="text-align:center;color:{TEXT_DIM};font-size:1rem;padding:4px 0;">↓ powers ↓</div>',
+        unsafe_allow_html=True,
+    )
+
+    # Row 5: AI Agents + Dashboard
+    st.markdown(
+        f'<div style="display:flex;justify-content:center;align-items:center;gap:8px;flex-wrap:wrap;">'
+        f'{_node("Alerts", alert_count, ERROR if alert_count > 0 else TEXT_DIM, "🚨")}'
+        f'{_arrow(BRAND_GREEN)}'
+        f'{_node("AI Agents", actions, BRAND_GREEN, "🤖")}'
+        f'{_arrow(BRAND_GREEN)}'
+        f'{_node("Reroute", sum(1 for a in data.get("actions", []) if a.get("action_type") == "reroute"), BRAND_GREEN, "🔀")}'
+        f'{_node("Notify", sum(1 for a in data.get("actions", []) if a.get("action_type") == "notify"), BRAND_BLUE_LIGHT, "💬")}'
+        f'{_node("Escalate", sum(1 for a in data.get("actions", []) if a.get("action_type") == "escalate"), ERROR, "⬆️")}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+    st.write("")
 
 
 def render_kpi(data: dict):

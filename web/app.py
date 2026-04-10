@@ -15,7 +15,7 @@ from web.theme import (
     inject_css,
 )
 from web.panels import (
-    render_kpi, render_order_funnel, render_warehouse_load,
+    render_pipeline, render_kpi, render_order_funnel, render_warehouse_load,
     render_fleet_map, render_eta, render_alerts,
     render_agent_actions, render_cascade,
 )
@@ -211,6 +211,12 @@ with st.sidebar:
 # ── Data layer ───────────────────────────────────────────────────────────────
 
 QUERIES = {
+    "counts":         "SELECT "
+                      "(SELECT COUNT(*) FROM orders) AS orders, "
+                      "(SELECT COUNT(*) FROM warehouse_events) AS wh_events, "
+                      "(SELECT COUNT(*) FROM shipments) AS shipments, "
+                      "(SELECT COUNT(*) FROM gps_pings) AS gps_pings, "
+                      "(SELECT COUNT(*) FROM agent_actions) AS agent_actions",
     "order_status":   "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status GROUP BY current_status",
     "agent_counts":   "SELECT action_type, COUNT(*) AS cnt FROM agent_actions GROUP BY action_type",
     "warehouse_load": "SELECT * FROM mv_warehouse_load ORDER BY warehouse_id",
@@ -281,6 +287,9 @@ _refresh = st.session_state.get("_refresh_sec", 5)
 @st.fragment(run_every=_refresh)
 def _live_dashboard():
     data = _fetch_all()
+
+    # Live architecture diagram
+    render_pipeline(data)
 
     render_kpi(data)
     st.write("")
