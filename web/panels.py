@@ -108,6 +108,7 @@ def _render_fleet_map_inner(data: dict):
                 orientation="h", yanchor="top", y=0.99, xanchor="left", x=0.01,
             ),
             map_style="carto-darkmatter",
+            uirevision="stable",
         )
         fig.update_traces(marker=dict(size=10))
         st.plotly_chart(fig, key="fleet_map", width="stretch")

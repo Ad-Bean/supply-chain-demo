@@ -87,5 +87,9 @@ def apply_rw_layout(fig, height=350):
         xaxis=dict(gridcolor=BORDER_DARK, zerolinecolor=BORDER_DARK),
         yaxis=dict(gridcolor=BORDER_DARK, zerolinecolor=BORDER_DARK),
         legend=dict(bgcolor="rgba(0,0,0,0)", font=dict(color=TEXT_MUTED)),
+        # Keep chart identity stable across data updates — Plotly animates
+        # the data change instead of recreating the chart from scratch
+        uirevision="stable",
+        transition={"duration": 400, "easing": "cubic-in-out"},
     )
     return fig
