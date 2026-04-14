@@ -19,6 +19,46 @@ from web.theme import (
 from web.sql_docs import show_sql
 
 
+def render_section_header(
+    title: str,
+    subtitle: str,
+    problem: list[str],
+    solution: list[str],
+    impact: list[str],
+):
+    """Render a themed section divider with problem/solution/impact cards."""
+    st.markdown(f"""
+    <div style="margin:32px 0 8px 0;padding:16px 0 8px 0;border-top:2px solid {BORDER_DARK};">
+        <h2 style="margin:0;color:{BRAND_GREEN};font-size:1.2rem;text-transform:uppercase;
+                   letter-spacing:0.08em;font-weight:600;">{title}</h2>
+        <p style="margin:4px 0 0 0;color:#FFFFFF;font-size:0.9rem;font-weight:400;">{subtitle}</p>
+    </div>
+    """, unsafe_allow_html=True)
+
+    if not st.session_state.get("show_sql"):
+        return
+
+    def _card(heading, color, items):
+        items_html = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items)
+        return (
+            f'<div style="flex:1;background:{BG_CARD};border:1px solid {BORDER_DARK};'
+            f'border-radius:8px;padding:12px 14px;min-width:160px;">'
+            f'<div style="color:{color};font-size:0.65rem;text-transform:uppercase;'
+            f'letter-spacing:0.08em;font-weight:600;margin-bottom:6px;">{heading}</div>'
+            f'<ul style="color:{TEXT_MUTED};font-size:0.78rem;margin:0;padding-left:16px;">'
+            f'{items_html}</ul></div>'
+        )
+
+    st.markdown(
+        f'<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">'
+        f'{_card("Problem", ERROR, problem)}'
+        f'{_card("Solution (RisingWave)", BRAND_BLUE_LIGHT, solution)}'
+        f'{_card("Business Impact", SUCCESS, impact)}'
+        f'</div>',
+        unsafe_allow_html=True,
+    )
+
+
 def render_pipeline(data: dict):
     """Render the live architecture pipeline showing data flow + counts."""
     counts = data["counts"][0] if data.get("counts") else {}
@@ -101,6 +141,7 @@ def render_pipeline(data: dict):
         f'{_node("AI Agents", actions, BRAND_GREEN, "🤖")}'
         f'{_arrow(BRAND_GREEN)}'
         f'{_node("Reroute", sum(1 for a in data.get("actions", []) if a.get("action_type") == "reroute"), BRAND_GREEN, "🔀")}'
+        f'{_node("Resolve", sum(1 for a in data.get("actions", []) if a.get("action_type") == "resolve"), SUCCESS, "✅")}'
         f'{_node("Notify", sum(1 for a in data.get("actions", []) if a.get("action_type") == "notify"), BRAND_BLUE_LIGHT, "💬")}'
         f'{_node("Escalate", sum(1 for a in data.get("actions", []) if a.get("action_type") == "escalate"), ERROR, "⬆️")}'
         f'</div>',
@@ -260,21 +301,23 @@ def render_alerts(data: dict):
 
 
 def render_agent_actions(data: dict):
-    st.subheader("AI Agent Actions")
-    st.caption("Autonomous actions taken by 3 AI agents: "
-               "Disruption Response (reroute/escalate), ETA Prediction, and Customer Notification. "
-               "Each action is logged to the `agent_actions` table in RisingWave.")
+    st.subheader("Autonomous Agent Actions")
+    st.caption("Real-time decisions by AI agents: Disruption Response (reroute/resolve/escalate), "
+               "ETA Prediction, and Customer Notification. Agents detect disruptions, resolve them "
+               "autonomously, and log every action to `agent_actions` in RisingWave.")
     show_sql("actions")
     if data["actions"]:
         df = pd.DataFrame(data["actions"])
         df["created_at"] = pd.to_datetime(df["created_at"])
         reroutes = len(df[df["action_type"] == "reroute"])
+        resolves = len(df[df["action_type"] == "resolve"])
         notifies = len(df[df["action_type"] == "notify"])
         escalations = len(df[df["action_type"] == "escalate"])
-        c1, c2, c3 = st.columns(3)
+        c1, c2, c3, c4 = st.columns(4)
         c1.metric("Reroutes", reroutes)
-        c2.metric("Notifications", notifies)
-        c3.metric("Escalations", escalations)
+        c2.metric("Resolved", resolves)
+        c3.metric("Notifications", notifies)
+        c4.metric("Escalations", escalations)
         st.dataframe(
             df.rename(columns={
                 "agent_name": "Agent", "action_type": "Action",

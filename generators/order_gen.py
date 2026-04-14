@@ -36,7 +36,18 @@ def insert_order(order: dict):
     )
 
 
-def run(count: int | None = None, interval: float = 2.0, stop_event=None):
+def seed_orders(n: int = 15):
+    """Insert a burst of orders immediately for faster pipeline fill."""
+    for _ in range(n):
+        order = generate_order()
+        insert_order(order)
+        print(f"[order:seed] {order['order_id']}  {order['customer_name']} → "
+              f"{order['product_name']} @ {order['warehouse_id']}")
+    print(f"[order] Seeded {n} orders")
+
+
+def run(count: int | None = None, interval: float = 2.0, stop_event=None,
+        seed: int = 0):
     """Generate orders continuously or up to `count`."""
     i = 0
     while count is None or i < count:

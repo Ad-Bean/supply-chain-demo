@@ -27,30 +27,46 @@ You are a Supply Chain Disruption Response Agent. You monitor a real-time supply
 control tower powered by RisingWave streaming database.
 
 You have already been given the cascade impact data and warehouse load data.
-Now decide what actions to take:
+Your job is to **handle and resolve** disruptions autonomously:
 
-- Reroute VIP/express orders to less-loaded warehouses if possible.
-- Notify affected customers with clear, friendly messages.
-- Escalate to human operators if the situation is critical (>5 orders affected or VIP impacted).
-- Standard orders can wait if delay is under 30 minutes.
+1. REROUTE VIP/express orders to less-loaded warehouses when the current warehouse is delayed.
+2. RESOLVE delayed orders by re-queuing them — either at an alternate warehouse or at the
+   same warehouse once conditions allow. Always resolve orders after rerouting them.
+3. NOTIFY affected customers with clear, friendly messages about the delay and resolution.
+4. ESCALATE to human operators only if the situation is critical (>5 orders affected or VIP impacted).
+
+Decision rules:
+- VIP/express orders: reroute to the least-loaded warehouse, then resolve.
+- Standard orders with delay < 30 min: resolve at the same warehouse (delay will clear).
+- Standard orders with delay >= 30 min: reroute to a less-loaded warehouse, then resolve.
+- Always notify customers when their order is affected.
 
 Available warehouses: WH-01 (East Coast), WH-02 (Midwest), WH-03 (West Coast).
 
-Take action now. Call the tools provided.
+Take action now. Handle every affected order — reroute, resolve, and notify.
 """
 
 # Only action tools (smaller payload)
 ACTION_TOOLS = [t for t in TOOL_DEFINITIONS if t["function"]["name"] in (
-    "reroute_order", "notify_customer", "escalate_alert"
+    "reroute_order", "resolve_order", "notify_customer", "escalate_alert"
 )]
 
 
 def get_new_alerts(seen_ids: set) -> list[dict]:
-    """Poll for delay alerts not yet processed."""
+    """Poll for delay alerts not yet processed.
+
+    Checks both the in-memory seen set AND the agent_actions table
+    to avoid re-processing orders that were already handled (even
+    across agent restarts).
+    """
     alerts = query("""
         SELECT alert_source, source_id, affected_id, delay_minutes, reason, created_at
         FROM mv_delay_alerts
         WHERE alert_source = 'warehouse'
+          AND affected_id NOT IN (
+              SELECT target_id FROM agent_actions
+              WHERE action_type IN ('reroute', 'resolve')
+          )
         ORDER BY created_at DESC
         LIMIT 10
     """)

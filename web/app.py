@@ -17,13 +17,13 @@ from web.theme import (
 from web.panels import (
     render_pipeline, render_kpi, render_order_funnel, render_warehouse_load,
     render_fleet_map, render_eta, render_alerts,
-    render_agent_actions, render_cascade,
+    render_agent_actions, render_cascade, render_section_header,
 )
 
 # ── Page config ──────────────────────────────────────────────────────────────
 
 st.set_page_config(
-    page_title="RisingWave | Supply Chain Control Tower",
+    page_title="RisingWave | AI-Native Supply Chain",
     page_icon=RW_ICON,
     layout="wide",
 )
@@ -36,10 +36,30 @@ if "gen_stop" not in st.session_state:
 if "agent_stop" not in st.session_state:
     st.session_state.agent_stop = threading.Event()
 
+# Process-level stop events — shared across all sessions so new sessions
+# can stop orphan threads from expired sessions.
+_GLOBAL_GEN_STOP: threading.Event | None = None
+_GLOBAL_AGENT_STOP: threading.Event | None = None
+
 
 def _start_threads(stop_key, thread_configs):
+    global _GLOBAL_GEN_STOP, _GLOBAL_AGENT_STOP
+
+    # Stop any orphan threads from previous sessions
+    if stop_key == "gen_stop" and _GLOBAL_GEN_STOP is not None:
+        _GLOBAL_GEN_STOP.set()
+    if stop_key == "agent_stop" and _GLOBAL_AGENT_STOP is not None:
+        _GLOBAL_AGENT_STOP.set()
+
     st.session_state[stop_key] = threading.Event()
     stop = st.session_state[stop_key]
+
+    # Track at process level
+    if stop_key == "gen_stop":
+        _GLOBAL_GEN_STOP = stop
+    else:
+        _GLOBAL_AGENT_STOP = stop
+
     for target, kwargs in thread_configs:
         kwargs["stop_event"] = stop
         threading.Thread(target=target, kwargs=kwargs, daemon=True).start()
@@ -47,15 +67,18 @@ def _start_threads(stop_key, thread_configs):
 
 def _on_gen_toggle():
     if st.session_state.gen_toggle:
+        from generators.seed_pipeline import seed
         from generators.order_gen import run as run_orders
         from generators.warehouse_gen import run as run_warehouse
         from generators.shipment_gen import run as run_shipments
         from generators.gps_gen import run as run_gps
+        # Seed the pipeline so every panel has data immediately
+        seed(n_orders=20)
         _start_threads("gen_stop", [
             (run_orders, {"interval": 2.0}),
-            (run_warehouse, {"interval": 3.0}),
+            (run_warehouse, {"interval": 2.0, "batch_size": 5}),
             (run_shipments, {"interval": 2.0}),
-            (run_gps, {"interval": 4.0}),
+            (run_gps, {"interval": 3.0}),
         ])
     else:
         st.session_state.gen_stop.set()
@@ -109,7 +132,7 @@ with st.sidebar:
     st.toggle("Data Generators", key="gen_toggle", on_change=_on_gen_toggle,
               help="Stream orders, warehouse events, shipments, and GPS pings")
     st.toggle("AI Agents", key="agent_toggle", on_change=_on_agent_toggle,
-              help="3 agents: Disruption Response, ETA Prediction, Customer Notification")
+              help="3 autonomous agents: Disruption Response (auto-resolve), ETA Prediction, Customer Notification")
     st.toggle("Show SQL", key="show_sql",
               help="Reveal the RisingWave materialized view definitions behind each panel")
 
@@ -228,12 +251,20 @@ QUERIES = {
                       "FROM mv_eta_predictions WHERE remaining_stops > 0 "
                       "ORDER BY eta_minutes DESC LIMIT 15",
     "alerts":         "SELECT alert_source, source_id, affected_id, delay_minutes, reason, created_at "
-                      "FROM mv_delay_alerts ORDER BY created_at DESC LIMIT 15",
+                      "FROM mv_delay_alerts "
+                      "WHERE affected_id NOT IN ("
+                      "  SELECT target_id FROM agent_actions "
+                      "  WHERE action_type IN ('reroute', 'resolve')"
+                      ") ORDER BY created_at DESC LIMIT 15",
     "actions":        "SELECT agent_name, action_type, target_id, reasoning, detail, created_at "
                       "FROM agent_actions ORDER BY created_at DESC LIMIT 20",
     "cascade":        "SELECT warehouse_id, warehouse_delay_min, order_id, customer_name, "
                       "priority, shipment_id, truck_id, destination "
-                      "FROM mv_cascade_impact ORDER BY priority, warehouse_delay_min DESC",
+                      "FROM mv_cascade_impact "
+                      "WHERE order_id NOT IN ("
+                      "  SELECT target_id FROM agent_actions "
+                      "  WHERE action_type IN ('reroute', 'resolve')"
+                      ") ORDER BY priority, warehouse_delay_min DESC",
 }
 
 
@@ -251,13 +282,12 @@ st.markdown(f"""
 <div style="display:flex;align-items:center;gap:12px;margin-bottom:4px;">
     <div>
         <h1 style="margin:0;font-size:1.6rem;color:#FFFFFF;font-weight:400;">
-            Supply Chain Control Tower
+            Real-Time Decisions Powered by
+            <a href="{RW_URL}" target="_blank" style="color:{BRAND_BLUE_LIGHT};text-decoration:none;">RisingWave</a>
         </h1>
         <p style="margin:0;color:{TEXT_MUTED};font-size:0.8rem;">
-            Real-time monitoring powered by
-            <a href="{RW_DOCS}" target="_blank" style="color:{BRAND_BLUE_LIGHT};text-decoration:none;">RisingWave</a>
-            streaming materialized views +
-            <span style="color:{BRAND_GREEN};">AI Agent</span>
+            AI-native supply chain visibility — streaming materialized views +
+            <span style="color:{BRAND_GREEN};">autonomous AI agents</span>
         </p>
     </div>
 </div>
@@ -296,11 +326,14 @@ def _live_dashboard():
     render_kpi(data)
     st.write("")
 
-    col_l, col_r = st.columns(2)
-    with col_l:
-        render_order_funnel(data)
-    with col_r:
-        render_warehouse_load(data)
+    # ── Section 1: Freight Intelligence ─────────────────────────────────
+    render_section_header(
+        "Freight Intelligence",
+        "Stop Flying Blind: Real-Time Shipment Visibility",
+        problem=["No unified system view", "Manual tracking + blind spots", "Customer dissatisfaction"],
+        solution=["Real-time joins (GPS + orders)", "Live shipment state", "Unified data layer"],
+        impact=["Full visibility", "Fewer support issues", "Higher customer trust"],
+    )
 
     render_fleet_map(data)
 
@@ -310,8 +343,33 @@ def _live_dashboard():
     with col_r2:
         render_alerts(data)
 
-    render_agent_actions(data)
+    # ── Section 2: Unified Inventory View ───────────────────────────────
+    render_section_header(
+        "Unified Inventory View",
+        "Fix Bottlenecks Instantly: Warehouse Optimization",
+        problem=["Inventory mismatches", "Hidden bottlenecks", "Inefficient workflows"],
+        solution=["Real-time inventory views", "Live bottleneck detection", "Continuous monitoring"],
+        impact=["Higher throughput", "Lower costs", "Operational efficiency"],
+    )
+
+    col_l, col_r = st.columns(2)
+    with col_l:
+        render_order_funnel(data)
+    with col_r:
+        render_warehouse_load(data)
+
     render_cascade(data)
+
+    # ── Section 3: AI-Native Supply Chain ───────────────────────────────
+    render_section_header(
+        "AI-Native Supply Chain",
+        "Power AI with Live Data: Autonomous Operations",
+        problem=["AI uses stale data", "Manual interventions", "Slow decision cycles"],
+        solution=["Real-time data via streaming MVs", "Event-driven automation", "Continuous intelligence"],
+        impact=["Automated decisions", "Faster execution", "Competitive edge"],
+    )
+
+    render_agent_actions(data)
 
 
 _live_dashboard()

@@ -126,6 +126,25 @@ TOOL_DEFINITIONS = [
             },
         },
     },
+    {
+        "type": "function",
+        "function": {
+            "name": "resolve_order",
+            "description": (
+                "Resolve a delayed order by re-queuing it for processing at its current "
+                "or a new warehouse. This clears the delay and restarts fulfillment."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "order_id": {"type": "string", "description": "The delayed order to resolve"},
+                    "warehouse_id": {"type": "string", "description": "Warehouse to process the order (current or new)"},
+                    "reason": {"type": "string", "description": "How the disruption was resolved"},
+                },
+                "required": ["order_id", "warehouse_id", "reason"],
+            },
+        },
+    },
 ]
 
 
@@ -206,6 +225,29 @@ def escalate_alert(summary: str, severity: str) -> str:
                         "severity": severity})
 
 
+def resolve_order(order_id: str, warehouse_id: str, reason: str) -> str:
+    """Resolve a delayed order by re-queuing it for fulfillment."""
+    action_id = f"ACT-{uuid.uuid4().hex[:8].upper()}"
+    # Log the resolution action
+    execute(
+        """INSERT INTO agent_actions (action_id, agent_name, action_type,
+           target_id, reasoning, detail)
+           VALUES (%s, %s, %s, %s, %s, %s)""",
+        (action_id, "disruption_agent", "resolve", order_id, reason,
+         f"Re-queued at {warehouse_id}"),
+    )
+    # Re-queue the order by inserting a fresh 'received' event
+    execute(
+        """INSERT INTO warehouse_events (event_id, order_id, warehouse_id,
+           event_type, delay_minutes, detail)
+           VALUES (%s, %s, %s, 'received', 0, %s)""",
+        (f"WE-{uuid.uuid4().hex[:8].upper()}", order_id, warehouse_id,
+         f"Resolved by AI agent: {reason}"),
+    )
+    return json.dumps({"status": "resolved", "action_id": action_id,
+                        "order_id": order_id, "warehouse_id": warehouse_id})
+
+
 # Map function name → callable
 TOOL_DISPATCH = {
     "query_cascade_impact": lambda **kw: query_cascade_impact(**kw),
@@ -215,4 +257,5 @@ TOOL_DISPATCH = {
     "reroute_order": lambda **kw: reroute_order(**kw),
     "notify_customer": lambda **kw: notify_customer(**kw),
     "escalate_alert": lambda **kw: escalate_alert(**kw),
+    "resolve_order": lambda **kw: resolve_order(**kw),
 }

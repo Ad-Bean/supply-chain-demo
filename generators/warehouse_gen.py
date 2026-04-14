@@ -61,31 +61,37 @@ def insert_event(order_id: str, warehouse_id: str, event_type: str,
     )
 
 
-def run(interval: float = 3.0, stop_event=None):
+def run(interval: float = 3.0, stop_event=None, batch_size: int = 5):
     """Continuously advance orders through the warehouse pipeline."""
+    # Process larger batches for the first few cycles to clear the seed backlog
+    ramp_cycles = 6
+    cycle = 0
     while not (stop_event and stop_event.is_set()):
         pending = get_pending_orders()
         if not pending:
             time.sleep(interval / GENERATOR_SPEED)
             continue
 
-        order = random.choice(pending)
-        nxt = next_event_type(order["current_status"])
-        if nxt is None:
-            time.sleep(0.5)
-            continue
+        # During ramp-up, process more orders per cycle
+        size = min(batch_size * 3, len(pending)) if cycle < ramp_cycles else min(batch_size, len(pending))
+        cycle += 1
+        batch = random.sample(pending, size)
+        for order in batch:
+            nxt = next_event_type(order["current_status"])
+            if nxt is None:
+                continue
 
-        # 10% chance of a delay (only during picking or packing)
-        if nxt in ("picking", "packed") and random.random() < 0.10:
-            delay_min = random.choice([15, 30, 45, 60])
-            insert_event(order["order_id"], order["warehouse_id"],
-                         "delay", delay_min,
-                         f"Equipment malfunction — {delay_min}min delay")
-            print(f"[warehouse] DELAY {order['order_id']} @ {order['warehouse_id']} "
-                  f"+{delay_min}min")
-        else:
-            insert_event(order["order_id"], order["warehouse_id"], nxt)
-            print(f"[warehouse] {order['order_id']} → {nxt}")
+            # 10% chance of a delay (only during picking or packing)
+            if nxt in ("picking", "packed") and random.random() < 0.10:
+                delay_min = random.choice([15, 30, 45, 60])
+                insert_event(order["order_id"], order["warehouse_id"],
+                             "delay", delay_min,
+                             f"Equipment malfunction — {delay_min}min delay")
+                print(f"[warehouse] DELAY {order['order_id']} @ {order['warehouse_id']} "
+                      f"+{delay_min}min")
+            else:
+                insert_event(order["order_id"], order["warehouse_id"], nxt)
+                print(f"[warehouse] {order['order_id']} → {nxt}")
 
         time.sleep(interval / GENERATOR_SPEED)
 

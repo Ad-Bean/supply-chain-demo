@@ -51,7 +51,7 @@ def get_unnotified_delays() -> list[dict]:
         FROM mv_cascade_impact ci
         WHERE ci.order_id NOT IN (
             SELECT target_id FROM agent_actions
-            WHERE agent_name = 'notification_agent' AND action_type = 'notify'
+            WHERE action_type IN ('notify', 'resolve')
         )
         ORDER BY
             CASE ci.priority WHEN 'vip' THEN 1 WHEN 'express' THEN 2 ELSE 3 END,
