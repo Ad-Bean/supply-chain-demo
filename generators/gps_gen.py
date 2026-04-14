@@ -47,7 +47,19 @@ def emit_ping(truck: dict):
     lon += random.uniform(-0.005, 0.01)
 
     remaining = max(0, int(truck["remaining_stops"]) - (1 if random.random() < 0.15 else 0))
-    speed = random.uniform(5, 55) if remaining > 0 else 0
+    # Most trucks cruise at normal speed; occasional slow-downs
+    speed = random.choice([
+        random.uniform(40, 65),   # 70% on-time
+        random.uniform(40, 65),
+        random.uniform(40, 65),
+        random.uniform(40, 65),
+        random.uniform(40, 65),
+        random.uniform(40, 65),
+        random.uniform(40, 65),
+        random.uniform(25, 40),   # 20% slight delay
+        random.uniform(25, 40),
+        random.uniform(8, 25),    # 10% delayed
+    ]) if remaining > 0 else 0
     heading = random.uniform(0, 360)
 
     execute(

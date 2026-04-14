@@ -75,7 +75,7 @@ def _on_gen_toggle():
         # Seed the pipeline so every panel has data immediately
         seed(n_orders=20)
         _start_threads("gen_stop", [
-            (run_orders, {"interval": 2.0}),
+            (run_orders, {"interval": 4.0}),
             (run_warehouse, {"interval": 2.0, "batch_size": 5}),
             (run_shipments, {"interval": 2.0}),
             (run_gps, {"interval": 3.0}),
@@ -240,7 +240,8 @@ QUERIES = {
                       "(SELECT COUNT(*) FROM shipments) AS shipments, "
                       "(SELECT COUNT(*) FROM gps_pings) AS gps_pings, "
                       "(SELECT COUNT(*) FROM agent_actions) AS agent_actions",
-    "order_status":   "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status GROUP BY current_status",
+    "order_status":   "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status "
+                      "WHERE current_status IS NOT NULL GROUP BY current_status",
     "agent_counts":   "SELECT action_type, COUNT(*) AS cnt FROM agent_actions GROUP BY action_type",
     "warehouse_load": "SELECT * FROM mv_warehouse_load ORDER BY warehouse_id",
     "tracking":       "SELECT DISTINCT ON (truck_id) truck_id, lat, lon, speed_mph, "
@@ -252,10 +253,11 @@ QUERIES = {
                       "ORDER BY eta_minutes DESC LIMIT 15",
     "alerts":         "SELECT alert_source, source_id, affected_id, delay_minutes, reason, created_at "
                       "FROM mv_delay_alerts "
-                      "WHERE affected_id NOT IN ("
-                      "  SELECT target_id FROM agent_actions "
-                      "  WHERE action_type IN ('reroute', 'resolve')"
-                      ") ORDER BY created_at DESC LIMIT 15",
+                      "WHERE alert_source = 'warehouse' "
+                      "  AND affected_id NOT IN ("
+                      "    SELECT target_id FROM agent_actions "
+                      "    WHERE action_type IN ('reroute', 'resolve')"
+                      "  ) ORDER BY created_at DESC LIMIT 15",
     "actions":        "SELECT agent_name, action_type, target_id, reasoning, detail, created_at "
                       "FROM agent_actions ORDER BY created_at DESC LIMIT 20",
     "cascade":        "SELECT warehouse_id, warehouse_delay_min, order_id, customer_name, "
@@ -326,30 +328,13 @@ def _live_dashboard():
     render_kpi(data)
     st.write("")
 
-    # ── Section 1: Freight Intelligence ─────────────────────────────────
-    render_section_header(
-        "Freight Intelligence",
-        "Stop Flying Blind: Real-Time Shipment Visibility",
-        problem=["No unified system view", "Manual tracking + blind spots", "Customer dissatisfaction"],
-        solution=["Real-time joins (GPS + orders)", "Live shipment state", "Unified data layer"],
-        impact=["Full visibility", "Fewer support issues", "Higher customer trust"],
-    )
-
-    render_fleet_map(data)
-
-    col_l2, col_r2 = st.columns(2)
-    with col_l2:
-        render_eta(data)
-    with col_r2:
-        render_alerts(data)
-
-    # ── Section 2: Unified Inventory View ───────────────────────────────
+    # ── Section 1: Unified Inventory View ───────────────────────────────
     render_section_header(
         "Unified Inventory View",
         "Fix Bottlenecks Instantly: Warehouse Optimization",
-        problem=["Inventory mismatches", "Hidden bottlenecks", "Inefficient workflows"],
-        solution=["Real-time inventory views", "Live bottleneck detection", "Continuous monitoring"],
-        impact=["Higher throughput", "Lower costs", "Operational efficiency"],
+        hint="Streaming GROUP BY in <b>mv_warehouse_load</b> maintains per-warehouse counts "
+             "incrementally. <b>mv_cascade_impact</b> is a 3-way streaming join that shows "
+             "the full blast radius of any delay — instantly.",
     )
 
     col_l, col_r = st.columns(2)
@@ -360,13 +345,30 @@ def _live_dashboard():
 
     render_cascade(data)
 
+    # ── Section 2: Freight Intelligence ─────────────────────────────────
+    render_section_header(
+        "Freight Intelligence",
+        "Stop Flying Blind: Real-Time Shipment Visibility",
+        hint="RisingWave joins GPS pings with orders and shipments in real time — no batch ETL. "
+             "MVs like <b>mv_shipment_tracking</b> and <b>mv_eta_predictions</b> update "
+             "incrementally as new data arrives.",
+    )
+
+    render_fleet_map(data)
+
+    col_l2, col_r2 = st.columns(2)
+    with col_l2:
+        render_eta(data)
+    with col_r2:
+        render_alerts(data)
+
     # ── Section 3: AI-Native Supply Chain ───────────────────────────────
     render_section_header(
         "AI-Native Supply Chain",
         "Power AI with Live Data: Autonomous Operations",
-        problem=["AI uses stale data", "Manual interventions", "Slow decision cycles"],
-        solution=["Real-time data via streaming MVs", "Event-driven automation", "Continuous intelligence"],
-        impact=["Automated decisions", "Faster execution", "Competitive edge"],
+        hint="AI agents query the same streaming MVs that power this dashboard. "
+             "<b>mv_delay_alerts</b> chains off <b>mv_eta_predictions</b> — RisingWave "
+             "propagates changes through the MV DAG automatically.",
     )
 
     render_agent_actions(data)

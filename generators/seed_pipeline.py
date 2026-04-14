@@ -111,7 +111,7 @@ def seed(n_orders: int = 20):
                 base_lat, base_lon = WH_COORDS[order["warehouse_id"]]
                 lat = base_lat + random.uniform(-0.1, 0.2)
                 lon = base_lon + random.uniform(-0.1, 0.2)
-                speed = random.uniform(25, 55)
+                speed = random.uniform(40, 60)
 
                 cur.execute(
                     """INSERT INTO gps_pings (ping_id, truck_id, lat, lon, speed_mph,

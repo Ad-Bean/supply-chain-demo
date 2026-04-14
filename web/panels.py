@@ -19,14 +19,8 @@ from web.theme import (
 from web.sql_docs import show_sql
 
 
-def render_section_header(
-    title: str,
-    subtitle: str,
-    problem: list[str],
-    solution: list[str],
-    impact: list[str],
-):
-    """Render a themed section divider with problem/solution/impact cards."""
+def render_section_header(title: str, subtitle: str, hint: str = ""):
+    """Render a themed section divider with an optional hint (shown with Show SQL)."""
     st.markdown(f"""
     <div style="margin:32px 0 8px 0;padding:16px 0 8px 0;border-top:2px solid {BORDER_DARK};">
         <h2 style="margin:0;color:{BRAND_GREEN};font-size:1.2rem;text-transform:uppercase;
@@ -35,28 +29,13 @@ def render_section_header(
     </div>
     """, unsafe_allow_html=True)
 
-    if not st.session_state.get("show_sql"):
-        return
-
-    def _card(heading, color, items):
-        items_html = "".join(f'<li style="margin:2px 0;">{i}</li>' for i in items)
-        return (
-            f'<div style="flex:1;background:{BG_CARD};border:1px solid {BORDER_DARK};'
-            f'border-radius:8px;padding:12px 14px;min-width:160px;">'
-            f'<div style="color:{color};font-size:0.65rem;text-transform:uppercase;'
-            f'letter-spacing:0.08em;font-weight:600;margin-bottom:6px;">{heading}</div>'
-            f'<ul style="color:{TEXT_MUTED};font-size:0.78rem;margin:0;padding-left:16px;">'
-            f'{items_html}</ul></div>'
+    if hint and st.session_state.get("show_sql"):
+        st.markdown(
+            f'<div style="background:{BG_CARD};border:1px solid {BORDER_DARK};border-radius:8px;'
+            f'padding:10px 14px;margin-bottom:12px;">'
+            f'<span style="color:{TEXT_MUTED};font-size:0.8rem;">{hint}</span></div>',
+            unsafe_allow_html=True,
         )
-
-    st.markdown(
-        f'<div style="display:flex;gap:10px;margin-bottom:16px;flex-wrap:wrap;">'
-        f'{_card("Problem", ERROR, problem)}'
-        f'{_card("Solution (RisingWave)", BRAND_BLUE_LIGHT, solution)}'
-        f'{_card("Business Impact", SUCCESS, impact)}'
-        f'</div>',
-        unsafe_allow_html=True,
-    )
 
 
 def render_pipeline(data: dict):
