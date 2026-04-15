@@ -41,7 +41,7 @@ LEFT JOIN (
 ) we ON o.order_id = we.order_id
 GROUP BY o.warehouse_id;
 
--- MV3: Shipment tracking — latest GPS per truck + shipment info
+-- MV3: Shipment tracking — latest shipment per truck + latest GPS
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_shipment_tracking AS
 SELECT
     s.shipment_id,
@@ -55,7 +55,11 @@ SELECT
     gps.speed_mph,
     gps.remaining_stops,
     gps.created_at AS last_ping
-FROM shipments s
+FROM (
+    SELECT DISTINCT ON (truck_id) *
+    FROM shipments
+    ORDER BY truck_id, created_at DESC
+) s
 LEFT JOIN (
     SELECT DISTINCT ON (truck_id) *
     FROM gps_pings
@@ -76,6 +80,8 @@ SELECT
         WHEN gps.speed_mph > 0 THEN
             gps.remaining_stops * (10.0 / gps.speed_mph) * 60  -- base minutes per stop
             * CASE WHEN gps.speed_mph < 25 THEN POWER(1.15, gps.remaining_stops) ELSE 1.0 END
+        WHEN gps.remaining_stops > 0 THEN
+            gps.remaining_stops * 120.0  -- assume 2hr per stop when stopped
         ELSE NULL
     END AS eta_minutes,
     CASE
@@ -89,7 +95,11 @@ SELECT
         ELSE 0.55
     END AS confidence,
     gps.created_at AS computed_at
-FROM shipments s
+FROM (
+    SELECT DISTINCT ON (truck_id) *
+    FROM shipments
+    ORDER BY truck_id, created_at DESC
+) s
 LEFT JOIN (
     SELECT DISTINCT ON (truck_id) *
     FROM gps_pings
@@ -115,7 +125,11 @@ SELECT
     eta.truck_id AS source_id,
     eta.order_id AS affected_id,
     eta.eta_minutes::INT AS delay_minutes,
-    eta.delay_status AS reason,
+    CASE
+        WHEN eta.speed_mph < 5  THEN 'Vehicle stopped — possible breakdown or accident'
+        WHEN eta.speed_mph < 15 THEN 'Severe traffic congestion — speed ' || ROUND(eta.speed_mph::NUMERIC, 0) || 'mph'
+        ELSE 'Traffic slowdown — speed ' || ROUND(eta.speed_mph::NUMERIC, 0) || 'mph'
+    END AS reason,
     eta.computed_at AS created_at
 FROM mv_eta_predictions eta
 WHERE eta.delay_status = 'delayed';

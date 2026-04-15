@@ -10,13 +10,15 @@ Orders come in → Warehouse processes them → Shipments go out → Trucks deli
                          RisingWave
                      (6 materialized views)
                               ↓
-                      3 AI Agents detect disruption
+                  GPS ping drops → ETA updates → alert fires
+                              ↓
+                      3 AI Agents respond autonomously
                       → reroute orders
                       → predict ETAs
                       → notify customers
 ```
 
-**The wow moment:** One warehouse disruption cascades into delayed shipments, updated ETAs, and triggered alerts — then AI agents autonomously resolve it in seconds.
+**The wow moment:** One warehouse disruption cascades into delayed shipments, updated ETAs, and triggered alerts — then AI agents autonomously resolve it in seconds. All powered by streaming SQL, no application glue code.
 
 ## Live Demo
 
@@ -26,38 +28,69 @@ The entire demo runs from a single browser tab:
 PYTHONPATH=. .venv/bin/streamlit run web/app.py
 ```
 
-1. Toggle **Data Generators** ON — orders start flowing
-2. Toggle **AI Agents** ON — 3 agents start watching
-3. Wait ~20 seconds for orders to build up
+1. Toggle **Data Generators** ON — orders, warehouse events, shipments, and GPS pings start flowing
+2. Toggle **AI Agents** ON — 3 agents start watching the same MVs that power the dashboard
+3. Wait ~20 seconds for the pipeline to fill
 4. Select a disruption scenario and click **Trigger Disruption**
-5. Watch the cascade and agent response in real-time
+5. Watch the cascade: warehouse delay → ETA spike → delay alert → agent reroutes/notifies
+
+### Dashboard Sections
+
+| Section | What it shows | Key MVs |
+|---------|--------------|---------|
+| **Unified Inventory View** | Order funnel, warehouse load by stage, cascade impact of delays | `mv_order_status`, `mv_warehouse_load`, `mv_cascade_impact` |
+| **Freight Intelligence** | Fleet map, ETA predictions with compounding delay model, unified delay alerts (warehouse + shipment) | `mv_shipment_tracking`, `mv_eta_predictions`, `mv_delay_alerts` |
+| **AI-Native Supply Chain** | Autonomous agent actions: reroutes, resolutions, notifications, escalations | `agent_actions` table |
+
+### What to highlight in a demo
+
+- **Streaming SQL, not application code.** Every panel is backed by a materialized view that updates incrementally — no batch jobs, no ETL pipelines.
+- **MV chaining.** `mv_delay_alerts` reads from `mv_eta_predictions`, which reads from `gps_pings` + `shipments`. A single GPS ping change propagates through the entire DAG automatically.
+- **Two types of delays.** Normal delays (equipment issues, scanner failures, mislabeled bins) happen randomly during warehouse processing. Disruption delays (power outage, severe weather, fire alarm) are triggered manually to simulate real-world chaos.
+- **AI agents consume the same MVs.** The disruption agent queries `mv_delay_alerts` and `mv_cascade_impact` — the exact same views the dashboard reads. No separate data pipeline for AI.
+- **Toggle Show SQL** to reveal the actual MV definitions behind each panel.
 
 ## Architecture
 
 ```
 Data Generators          RisingWave Cloud              AI Agents
 ─────────────────      ──────────────────────      ─────────────────
-orders_gen.py     →    orders table                 disruption_agent.py
-warehouse_gen.py  →    warehouse_events table   ←── queries MVs
+order_gen.py      →    orders table                 disruption_agent.py
+warehouse_gen.py  →    warehouse_events table   ←── queries MVs, takes action
 shipment_gen.py   →    shipments table              eta_agent.py
 gps_gen.py        →    gps_pings table              notification_agent.py
                        ↓                                ↓
                        6 materialized views          agent_actions table
-                       (auto-updating)                  ↓
+                       (incrementally updated)          ↓
                        ↓                            Streamlit dashboard
                        Streamlit dashboard
+```
+
+### Materialized View DAG
+
+```
+gps_pings ──→ mv_shipment_tracking
+         └──→ mv_eta_predictions ──→ mv_delay_alerts ──→ AI agents
+warehouse_events ──→ mv_delay_alerts
+                └──→ mv_warehouse_load
+                └──→ mv_cascade_impact
+orders ──→ mv_order_status
 ```
 
 ## AI Agents
 
 | Agent | What it does | Poll interval |
 |-------|-------------|---------------|
-| **Disruption Response** | Detects warehouse delays, queries cascade impact, reroutes VIP/express orders, escalates critical situations | 5s |
+| **Disruption Response** | Detects warehouse delays, queries cascade impact, reroutes VIP/express orders, resolves standard orders, escalates critical situations | 5s |
 | **ETA Prediction** | Enriches low-confidence ETAs using LLM reasoning about traffic patterns, time-of-day, and route conditions | 15s |
 | **Customer Notification** | Crafts personalized delay messages based on customer priority (VIP/express/standard) and delay severity | 10s |
 
-## Disruption Scenarios
+## Delay Types
 
+### Normal delays (random, during warehouse processing)
+10% chance during picking or packing. Reasons vary: equipment malfunction, scanner failure, forklift battery, mislabeled bin, quality check hold, pallet wrapping machine offline, shift handover gap, barcode unreadable, overweight repack, dock door fault.
+
+### Disruption delays (manually triggered via dashboard)
 8 realistic scenarios with randomized parameters:
 
 | Scenario | Delay Range | Description |
@@ -70,6 +103,9 @@ gps_gen.py        →    gps_pings table              notification_agent.py
 | WMS System Outage | 20-40 min | Warehouse Management System crash |
 | Fire Alarm | 40-90 min | Mandatory evacuation |
 | Shipping Dock Backup | 25-55 min | Truck scheduling error creates congestion |
+
+### Shipment delays (derived from GPS speed)
+Computed in `mv_eta_predictions` — when truck speed drops below 25 mph, the shipment is flagged as delayed. `mv_delay_alerts` derives a human-readable reason: traffic slowdown, severe congestion, or vehicle stopped.
 
 ## Quick Start
 
@@ -146,14 +182,15 @@ supply-chain-demo/
 │       └── supply_chain_tools.py      # 7 tools agents can call
 ├── generators/
 │   ├── seed_data.py                   # Warehouses, products, customers, trucks
+│   ├── seed_pipeline.py               # Fast seed for instant dashboard data
 │   ├── scenarios.py                   # 8 disruption scenarios
 │   ├── order_gen.py                   # Order stream
-│   ├── warehouse_gen.py               # Warehouse processing pipeline
+│   ├── warehouse_gen.py               # Warehouse processing + random delays
 │   ├── shipment_gen.py                # Shipment creation
 │   └── gps_gen.py                     # GPS ping emitter
 ├── sql/
 │   ├── 01-tables.sql                  # 5 source tables
-│   └── 02-materialized-views.sql      # 6 streaming MVs
+│   └── 02-materialized-views.sql      # 6 streaming MVs (with MV chaining)
 ├── scripts/
 │   ├── setup_schema.py                # Apply DDL to RisingWave
 │   ├── run_generators.py              # Run all generators (CLI)

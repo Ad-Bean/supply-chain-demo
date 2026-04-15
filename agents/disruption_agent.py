@@ -174,7 +174,10 @@ def run(poll_interval: float = 5.0, stop_event=None):
                 console.print()
         except Exception as e:
             console.print(f"[red]Error: {e}[/]")
-        time.sleep(poll_interval)
+        if stop_event:
+            stop_event.wait(poll_interval)
+        else:
+            time.sleep(poll_interval)
 
 
 if __name__ == "__main__":

@@ -130,7 +130,10 @@ def run(poll_interval: float = 10.0, stop_event=None):
                 notify_customer(order)
         except Exception as e:
             console.print(f"[red]Notification Agent error: {e}[/]")
-        time.sleep(poll_interval)
+        if stop_event:
+            stop_event.wait(poll_interval)
+        else:
+            time.sleep(poll_interval)
 
 
 if __name__ == "__main__":

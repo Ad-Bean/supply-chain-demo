@@ -51,7 +51,10 @@ def run(interval: float = 2.0, stop_event=None):
         ready = get_shipped_without_shipment()
         for order in ready:
             create_shipment(order["order_id"], order["warehouse_id"])
-        time.sleep(interval / GENERATOR_SPEED)
+        if stop_event:
+            stop_event.wait(interval / GENERATOR_SPEED)
+        else:
+            time.sleep(interval / GENERATOR_SPEED)
 
 
 if __name__ == "__main__":

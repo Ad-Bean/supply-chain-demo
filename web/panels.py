@@ -238,17 +238,20 @@ def _render_fleet_map_inner(data: dict):
 
 def render_eta(data: dict):
     st.subheader("Fleet ETA Predictions")
-    st.caption("ETAs computed from GPS speed + remaining stops with compounding delay factor. "
+    st.caption("Streaming ETA model in pure SQL — joins live GPS pings with shipments. "
+               "Uses a compounding delay factor: slow trucks get exponentially penalized per remaining stop. "
                "Backed by `mv_eta_predictions`.")
     show_sql("eta")
     if data["eta"]:
         df = pd.DataFrame(data["eta"])
         df["eta_minutes"] = df["eta_minutes"].apply(lambda x: round(float(x), 1) if x else None)
+        df["speed_mph"] = df["speed_mph"].apply(lambda x: round(float(x), 1) if x else 0)
         df["confidence"] = df["confidence"].apply(lambda x: round(float(x), 2) if x else None)
         st.dataframe(
             df.rename(columns={
                 "shipment_id": "Shipment", "truck_id": "Truck",
-                "remaining_stops": "Stops Left", "speed_mph": "Speed",
+                "destination": "Destination",
+                "remaining_stops": "Stops Left", "speed_mph": "Speed (mph)",
                 "eta_minutes": "ETA (min)", "delay_status": "Status",
                 "confidence": "Confidence",
             }),
@@ -260,8 +263,9 @@ def render_eta(data: dict):
 
 def render_alerts(data: dict):
     st.subheader("Delay Alerts")
-    st.caption("Warehouse delays >10min and shipments marked as delayed. "
-               "Backed by `mv_delay_alerts`, triggers AI agents.")
+    st.caption("Unified alert feed: warehouse delays (>10 min) and shipment delays "
+               "(traffic congestion, vehicle stopped). This MV chains off `mv_eta_predictions` — "
+               "a GPS ping drop cascades into an alert automatically.")
     show_sql("alerts")
     if data["alerts"]:
         df = pd.DataFrame(data["alerts"])

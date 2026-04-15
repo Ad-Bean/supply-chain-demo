@@ -136,7 +136,7 @@ with st.sidebar:
     st.toggle("Show SQL", key="show_sql",
               help="Reveal the RisingWave materialized view definitions behind each panel")
 
-    REFRESH_OPTIONS = {"1s": 1, "2s": 2, "3s": 3, "5s": 5, "10s": 10, "30s": 30}
+    REFRESH_OPTIONS = {"1s": 1, "2s": 2, "3s": 3, "5s": 5, "10s": 10, "30s": 30, "None": None}
 
     def _on_refresh_change():
         st.session_state._refresh_sec = REFRESH_OPTIONS[st.session_state._refresh_sel]
@@ -187,13 +187,14 @@ with st.sidebar:
         from db import execute_batch, query as db_query
         import uuid
         delayed = db_query("""
-            SELECT DISTINCT o.order_id, o.warehouse_id
+            SELECT o.order_id, o.warehouse_id
             FROM orders o
-            JOIN warehouse_events we ON o.order_id = we.order_id
-            WHERE we.event_type = 'delay'
-              AND o.order_id NOT IN (
-                  SELECT order_id FROM warehouse_events WHERE event_type = 'shipped'
-              )
+            JOIN (
+                SELECT DISTINCT ON (order_id) order_id, event_type
+                FROM warehouse_events
+                ORDER BY order_id, created_at DESC
+            ) latest ON o.order_id = latest.order_id
+            WHERE latest.event_type = 'delay'
         """)
         if delayed:
             stmts = [
@@ -234,39 +235,43 @@ with st.sidebar:
 # ── Data layer ───────────────────────────────────────────────────────────────
 
 QUERIES = {
+    # Derive counts from MVs instead of scanning raw tables
     "counts":         "SELECT "
-                      "(SELECT COUNT(*) FROM orders) AS orders, "
-                      "(SELECT COUNT(*) FROM warehouse_events) AS wh_events, "
-                      "(SELECT COUNT(*) FROM shipments) AS shipments, "
+                      "(SELECT SUM(total_orders) FROM mv_warehouse_load) AS orders, "
+                      "(SELECT COUNT(*) FROM mv_order_status) AS wh_events, "
+                      "(SELECT COUNT(*) FROM mv_shipment_tracking) AS shipments, "
                       "(SELECT COUNT(*) FROM gps_pings) AS gps_pings, "
                       "(SELECT COUNT(*) FROM agent_actions) AS agent_actions",
     "order_status":   "SELECT current_status, COUNT(*) AS cnt FROM mv_order_status "
                       "WHERE current_status IS NOT NULL GROUP BY current_status",
     "agent_counts":   "SELECT action_type, COUNT(*) AS cnt FROM agent_actions GROUP BY action_type",
     "warehouse_load": "SELECT * FROM mv_warehouse_load ORDER BY warehouse_id",
-    "tracking":       "SELECT DISTINCT ON (truck_id) truck_id, lat, lon, speed_mph, "
+    "tracking":       "SELECT truck_id, lat, lon, speed_mph, "
                       "remaining_stops, destination FROM mv_shipment_tracking "
-                      "WHERE lat IS NOT NULL ORDER BY truck_id",
-    "eta":            "SELECT shipment_id, truck_id, remaining_stops, speed_mph, "
+                      "WHERE lat IS NOT NULL",
+    "eta":            "SELECT shipment_id, truck_id, destination, remaining_stops, speed_mph, "
                       "eta_minutes, delay_status, confidence "
                       "FROM mv_eta_predictions WHERE remaining_stops > 0 "
-                      "ORDER BY eta_minutes DESC LIMIT 15",
-    "alerts":         "SELECT alert_source, source_id, affected_id, delay_minutes, reason, created_at "
-                      "FROM mv_delay_alerts "
-                      "WHERE alert_source = 'warehouse' "
-                      "  AND affected_id NOT IN ("
-                      "    SELECT target_id FROM agent_actions "
-                      "    WHERE action_type IN ('reroute', 'resolve')"
-                      "  ) ORDER BY created_at DESC LIMIT 15",
+                      "ORDER BY eta_minutes DESC NULLS LAST LIMIT 15",
+    "alerts":         "SELECT a.alert_source, a.source_id, a.affected_id, "
+                      "a.delay_minutes, a.reason, a.created_at "
+                      "FROM mv_delay_alerts a "
+                      "LEFT JOIN agent_actions aa "
+                      "  ON a.affected_id = aa.target_id "
+                      "  AND aa.action_type IN ('reroute', 'resolve') "
+                      "WHERE aa.target_id IS NULL "
+                      "ORDER BY a.created_at DESC LIMIT 15",
     "actions":        "SELECT agent_name, action_type, target_id, reasoning, detail, created_at "
                       "FROM agent_actions ORDER BY created_at DESC LIMIT 20",
-    "cascade":        "SELECT warehouse_id, warehouse_delay_min, order_id, customer_name, "
-                      "priority, shipment_id, truck_id, destination "
-                      "FROM mv_cascade_impact "
-                      "WHERE order_id NOT IN ("
-                      "  SELECT target_id FROM agent_actions "
-                      "  WHERE action_type IN ('reroute', 'resolve')"
-                      ") ORDER BY priority, warehouse_delay_min DESC",
+    "cascade":        "SELECT ci.warehouse_id, ci.warehouse_delay_min, ci.order_id, "
+                      "ci.customer_name, ci.priority, ci.shipment_id, ci.truck_id, "
+                      "ci.destination "
+                      "FROM mv_cascade_impact ci "
+                      "LEFT JOIN agent_actions aa "
+                      "  ON ci.order_id = aa.target_id "
+                      "  AND aa.action_type IN ('reroute', 'resolve') "
+                      "WHERE aa.target_id IS NULL "
+                      "ORDER BY ci.priority, ci.warehouse_delay_min DESC",
 }
 
 
@@ -309,7 +314,10 @@ if st.session_state.get("show_sql"):
     )
 
 _refresh = st.session_state.get("_refresh_sec", 5)
-st.caption(f"Live dashboard refreshing every {_refresh}s.")
+if _refresh is None:
+    st.caption("Live dashboard — auto-refresh paused.")
+else:
+    st.caption(f"Live dashboard refreshing every {_refresh}s.")
 
 # ── Single live fragment with fade-in animation ──────────────────────────────
 
@@ -349,9 +357,10 @@ def _live_dashboard():
     render_section_header(
         "Freight Intelligence",
         "Stop Flying Blind: Real-Time Shipment Visibility",
-        hint="RisingWave joins GPS pings with orders and shipments in real time — no batch ETL. "
-             "MVs like <b>mv_shipment_tracking</b> and <b>mv_eta_predictions</b> update "
-             "incrementally as new data arrives.",
+        hint="RisingWave joins GPS pings with shipments in real time — no batch ETL. "
+             "<b>mv_eta_predictions</b> computes ETAs with a compounding delay model, then "
+             "<b>mv_delay_alerts</b> chains off it to surface both warehouse and shipment "
+             "delays. One GPS ping drop cascades through the MV DAG into an actionable alert.",
     )
 
     render_fleet_map(data)

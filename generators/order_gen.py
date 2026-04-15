@@ -58,7 +58,10 @@ def run(count: int | None = None, interval: float = 2.0, stop_event=None,
         print(f"[order] {order['order_id']}  {order['customer_name']} → "
               f"{order['product_name']} @ {order['warehouse_id']}")
         i += 1
-        time.sleep(interval / GENERATOR_SPEED)
+        if stop_event:
+            stop_event.wait(interval / GENERATOR_SPEED)
+        else:
+            time.sleep(interval / GENERATOR_SPEED)
 
 
 if __name__ == "__main__":

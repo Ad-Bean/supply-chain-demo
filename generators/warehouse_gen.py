@@ -11,6 +11,20 @@ from config import GENERATOR_SPEED
 # Normal processing pipeline
 PIPELINE = ["received", "picking", "packed", "shipped"]
 
+# Normal (non-disruption) delay reasons
+NORMAL_DELAY_REASONS = [
+    "Equipment malfunction — conveyor belt jam",
+    "Scanner hardware failure — manual entry required",
+    "Forklift battery died mid-aisle",
+    "Mislabeled bin location — re-pick needed",
+    "Quality check hold — damaged packaging detected",
+    "Pallet wrapping machine offline",
+    "Staff shift handover gap",
+    "Barcode unreadable — manual verification",
+    "Overweight package — repack required",
+    "Dock door sensor fault — safety lockout",
+]
+
 
 def get_pending_orders() -> list[dict]:
     """Find orders whose latest event is not yet 'shipped'."""
@@ -69,7 +83,10 @@ def run(interval: float = 3.0, stop_event=None, batch_size: int = 5):
     while not (stop_event and stop_event.is_set()):
         pending = get_pending_orders()
         if not pending:
-            time.sleep(interval / GENERATOR_SPEED)
+            if stop_event:
+                stop_event.wait(interval / GENERATOR_SPEED)
+            else:
+                time.sleep(interval / GENERATOR_SPEED)
             continue
 
         # During ramp-up, process more orders per cycle
@@ -84,16 +101,20 @@ def run(interval: float = 3.0, stop_event=None, batch_size: int = 5):
             # 10% chance of a delay (only during picking or packing)
             if nxt in ("picking", "packed") and random.random() < 0.10:
                 delay_min = random.choice([15, 30, 45, 60])
+                reason = random.choice(NORMAL_DELAY_REASONS)
                 insert_event(order["order_id"], order["warehouse_id"],
                              "delay", delay_min,
-                             f"Equipment malfunction — {delay_min}min delay")
+                             f"{reason} — {delay_min}min delay")
                 print(f"[warehouse] DELAY {order['order_id']} @ {order['warehouse_id']} "
                       f"+{delay_min}min")
             else:
                 insert_event(order["order_id"], order["warehouse_id"], nxt)
                 print(f"[warehouse] {order['order_id']} → {nxt}")
 
-        time.sleep(interval / GENERATOR_SPEED)
+        if stop_event:
+            stop_event.wait(interval / GENERATOR_SPEED)
+        else:
+            time.sleep(interval / GENERATOR_SPEED)
 
 
 if __name__ == "__main__":

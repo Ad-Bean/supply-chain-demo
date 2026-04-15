@@ -86,7 +86,10 @@ def run(interval: float = 5.0, stop_event=None):
         for truck in trucks:
             if int(truck["remaining_stops"]) > 0:
                 emit_ping(truck)
-        time.sleep(interval / GENERATOR_SPEED)
+        if stop_event:
+            stop_event.wait(interval / GENERATOR_SPEED)
+        else:
+            time.sleep(interval / GENERATOR_SPEED)
 
 
 if __name__ == "__main__":
