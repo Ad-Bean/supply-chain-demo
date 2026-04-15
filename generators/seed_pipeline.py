@@ -7,7 +7,7 @@ dashboard panel has data immediately when generators start.
 import random
 import uuid
 
-from db import get_conn, query
+from db import get_pooled_conn, return_conn, query
 from generators.seed_data import CUSTOMERS, PRODUCTS, WAREHOUSES, DESTINATIONS, TRUCKS
 
 WH_COORDS = {wh["id"]: (wh["lat"], wh["lon"]) for wh in WAREHOUSES}
@@ -28,7 +28,7 @@ def seed(n_orders: int = 20):
         print(f"[seed] Skipped — {existing[0]['c']} orders already exist")
         return
 
-    conn = get_conn()
+    conn = get_pooled_conn()
     try:
         with conn.cursor() as cur:
             orders = []
@@ -126,7 +126,7 @@ def seed(n_orders: int = 20):
               f"{len(shipped_orders)} shipments, "
               f"{len(trucks_used)} trucks on map")
     finally:
-        conn.close()
+        return_conn(conn)
 
 
 if __name__ == "__main__":

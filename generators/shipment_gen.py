@@ -21,9 +21,29 @@ def get_shipped_without_shipment() -> list[dict]:
     """)
 
 
+def _get_busy_trucks() -> set[str]:
+    """Trucks that have active (undelivered) shipments."""
+    rows = query("""
+        SELECT DISTINCT s.truck_id FROM shipments s
+        LEFT JOIN (
+            SELECT DISTINCT ON (truck_id) truck_id, remaining_stops
+            FROM gps_pings ORDER BY truck_id, created_at DESC
+        ) gps ON s.truck_id = gps.truck_id
+        WHERE COALESCE(gps.remaining_stops, s.total_stops) > 0
+    """)
+    return {r["truck_id"] for r in rows}
+
+
 def create_shipment(order_id: str, warehouse_id: str):
-    # Pick a truck from the same warehouse
-    wh_trucks = [t for t in TRUCKS if t["warehouse_id"] == warehouse_id]
+    busy = _get_busy_trucks()
+    # Prefer a truck from the same warehouse that isn't busy
+    wh_trucks = [t for t in TRUCKS if t["warehouse_id"] == warehouse_id and t["id"] not in busy]
+    if not wh_trucks:
+        # Fall back to any available truck
+        wh_trucks = [t for t in TRUCKS if t["id"] not in busy]
+    if not wh_trucks:
+        # All trucks busy — reuse one from this warehouse as last resort
+        wh_trucks = [t for t in TRUCKS if t["warehouse_id"] == warehouse_id]
     truck = random.choice(wh_trucks) if wh_trucks else random.choice(TRUCKS)
     dest = random.choice(DESTINATIONS)
     total_stops = random.randint(3, 12)

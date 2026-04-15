@@ -85,11 +85,13 @@ SELECT
         ELSE NULL
     END AS eta_minutes,
     CASE
+        WHEN gps.remaining_stops IS NULL OR gps.remaining_stops = 0 THEN 'delivered'
         WHEN gps.speed_mph >= 40 THEN 'on_time'
         WHEN gps.speed_mph >= 25 THEN 'slight_delay'
         ELSE 'delayed'
     END AS delay_status,
     CASE
+        WHEN gps.remaining_stops IS NULL OR gps.remaining_stops = 0 THEN 1.0
         WHEN gps.speed_mph >= 40 THEN 0.92
         WHEN gps.speed_mph >= 25 THEN 0.75
         ELSE 0.55
@@ -115,8 +117,12 @@ SELECT
     we.delay_minutes,
     we.detail AS reason,
     we.created_at
-FROM warehouse_events we
-WHERE we.event_type = 'delay' AND we.delay_minutes > 10
+FROM (
+    SELECT DISTINCT ON (order_id) *
+    FROM warehouse_events
+    WHERE event_type = 'delay' AND delay_minutes > 10
+    ORDER BY order_id, created_at DESC
+) we
 
 UNION ALL
 
@@ -135,6 +141,7 @@ FROM mv_eta_predictions eta
 WHERE eta.delay_status = 'delayed';
 
 -- MV6: Cascade impact — warehouse delay → which shipments & orders affected
+-- Uses latest delay event per order to avoid duplicate rows
 CREATE MATERIALIZED VIEW IF NOT EXISTS mv_cascade_impact AS
 SELECT
     we.warehouse_id,
@@ -145,8 +152,11 @@ SELECT
     s.shipment_id,
     s.truck_id,
     s.destination
-FROM warehouse_events we
+FROM (
+    SELECT DISTINCT ON (order_id) order_id, warehouse_id, delay_minutes
+    FROM warehouse_events
+    WHERE event_type = 'delay' AND delay_minutes > 10
+    ORDER BY order_id, created_at DESC
+) we
 JOIN orders o ON we.order_id = o.order_id
-LEFT JOIN shipments s ON o.order_id = s.order_id
-WHERE we.event_type = 'delay'
-  AND we.delay_minutes > 10;
+LEFT JOIN shipments s ON o.order_id = s.order_id;

@@ -60,10 +60,12 @@ SELECT
     WHEN gps.remaining_stops > 0 THEN
         gps.remaining_stops * 120.0  -- fallback for stopped trucks
     ELSE NULL END AS eta_minutes,
-    CASE WHEN gps.speed_mph >= 40 THEN 'on_time'
+    CASE WHEN remaining_stops = 0 THEN 'delivered'
+         WHEN gps.speed_mph >= 40 THEN 'on_time'
          WHEN gps.speed_mph >= 25 THEN 'slight_delay'
          ELSE 'delayed' END AS delay_status,
-    CASE WHEN gps.speed_mph >= 40 THEN 0.92
+    CASE WHEN remaining_stops = 0 THEN 1.0
+         WHEN gps.speed_mph >= 40 THEN 0.92
          WHEN gps.speed_mph >= 25 THEN 0.75
          ELSE 0.55 END AS confidence
 FROM (...latest shipment per truck...) s

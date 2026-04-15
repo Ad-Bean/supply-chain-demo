@@ -8,7 +8,11 @@ import streamlit as st
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
 
-from db import query_batch
+from db import query_batch, warmup
+
+# Pre-warm the connection pool on first load so toggle clicks don't
+# pay the TCP+TLS handshake cost (~200-500ms to RisingWave Cloud).
+warmup()
 from web.theme import (
     RW_ICON, RW_LOGO, RW_URL, RW_DOCS, RW_GITHUB, RW_CLOUD,
     BRAND_BLUE_LIGHT, BRAND_GREEN, TEXT_MUTED, TEXT_DIM, ERROR,
@@ -80,8 +84,16 @@ def _on_gen_toggle():
             (run_shipments, {"interval": 2.0}),
             (run_gps, {"interval": 3.0}),
         ])
+        # Auto-start AI agents so the demo is one-click
+        if not st.session_state.get("agent_toggle"):
+            st.session_state.agent_toggle = True
+            _on_agent_toggle()
     else:
         st.session_state.gen_stop.set()
+        # Stop agents when generators stop
+        if st.session_state.get("agent_toggle"):
+            st.session_state.agent_toggle = False
+            st.session_state.agent_stop.set()
 
 
 def _on_agent_toggle():

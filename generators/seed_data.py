@@ -36,5 +36,5 @@ DESTINATIONS = [
 
 TRUCKS = [
     {"id": f"TRUCK-{i:02d}", "warehouse_id": WAREHOUSES[i % len(WAREHOUSES)]["id"]}
-    for i in range(1, 11)
+    for i in range(1, 21)
 ]

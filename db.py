@@ -36,8 +36,34 @@ def get_conn():
     return psycopg2.connect(**RW)
 
 
+def warmup():
+    """Pre-warm the pool by creating the first connection eagerly.
+
+    Call at app startup so the first user action doesn't pay the
+    TCP+TLS handshake cost (~200-500ms to a remote DB).
+    """
+    conn = _get_pool().getconn()
+    _get_pool().putconn(conn)
+
+
+def get_pooled_conn():
+    """Return a pooled connection for callers that need a long-lived cursor.
+
+    The caller MUST call return_conn(conn) when done (not conn.close()).
+    """
+    return _get_pool().getconn()
+
+
+def return_conn(conn):
+    """Return a pooled connection obtained via get_pooled_conn()."""
+    try:
+        _get_pool().putconn(conn)
+    except Exception:
+        pass
+
+
 def _putconn(conn):
-    """Return a connection to the pool."""
+    """Return a connection to the pool (internal helper)."""
     try:
         _get_pool().putconn(conn)
     except Exception:
