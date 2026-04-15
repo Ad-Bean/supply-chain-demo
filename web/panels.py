@@ -41,11 +41,11 @@ def render_section_header(title: str, subtitle: str, hint: str = ""):
 def render_pipeline(data: dict):
     """Render the live architecture pipeline showing data flow + counts."""
     counts = data["counts"][0] if data.get("counts") else {}
-    orders = counts.get("orders", 0)
-    wh_events = counts.get("wh_events", 0)
-    shipments = counts.get("shipments", 0)
-    gps = counts.get("gps_pings", 0)
-    actions = counts.get("agent_actions", 0)
+    orders = int(counts.get("orders") or 0)
+    wh_events = int(counts.get("wh_events") or 0)
+    shipments = int(counts.get("shipments") or 0)
+    gps = int(counts.get("gps_pings") or 0)
+    actions = int(counts.get("agent_actions") or 0)
 
     # Count alerts and delayed
     odf = pd.DataFrame(data["order_status"]) if data.get("order_status") else pd.DataFrame()
